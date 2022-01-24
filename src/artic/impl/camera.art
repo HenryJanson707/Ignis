@@ -1,3 +1,32 @@
+fn @make_light_camera(tmin: f32, tmax: f32, buf: DeviceBuffer, num_lights: i32, lights: LightTable){
+    let pdf_pick = 1 / (num_lights as f32);
+
+    Camera {
+        generate_ray = @ |_, _, pixel, rnd| {
+            let mut temp_rand   = rnd; //maybe faster to just give a mutable random value
+            let light_id        = pick_light(&mut temp_rand, num_lights);
+            let light           = @lights(light_id);
+            let sample_emission = light.sample_emission;
+            let light_sample    = @sample_emission(&mut temp_rand);
+        
+            let pdf             = light_sample.pdf_area * light_sample.pdf_dir * pdf_pick;
+            let pos             = light_sample.pos;
+            let dir             = light_sample.dir;
+            let intensity       = color_to_vec3(light_sample.intensity);
+            
+            let current_pos     = pixel * 12;
+            //The current size of one data point is 12 bytes (last: i32 (0, 1), material: i32, pdf: f32, pos: vec3, dir: vec3, intensity: vec3)
+
+            buf.store_int2(current_pos, 0, -1); //Has the light a material???
+            buf.store_f32(current_pos + 2, pdf);
+            buf.store_vec3(current_pos + 3, pos);
+            buf.store_vec3(current_pos + 6, dir);
+            buf.store_vec3(current_pos + 9, intensity);
+            make_ray(pos, dir, tmin, tmax)
+        }
+    }
+}
+
 // Creates a perspective camera
 fn @make_perspective_camera(eye: Vec3, view: Mat3x3, w: f32, h: f32, tmin: f32, tmax: f32) -> Camera {
     let dir   = view.col(2);
@@ -5,7 +34,7 @@ fn @make_perspective_camera(eye: Vec3, view: Mat3x3, w: f32, h: f32, tmin: f32, 
     let up    = view.col(1);
 
     Camera {
-        generate_ray = @ |x, y| {
+        generate_ray = @ |x, y, _, _| {
             let d = vec3_normalize(
                 vec3_add(
                     vec3_add(vec3_mulf(right, w * x),
@@ -25,7 +54,7 @@ fn @make_orthogonal_camera(eye: Vec3, view: Mat3x3, w: f32, h: f32, tmin: f32, t
     let up    = view.col(1);
 
     Camera {
-        generate_ray = @ |x, y| {
+        generate_ray = @ |x, y, _, _| {
             let pos = vec3_add(
                             vec3_add(vec3_mulf(right, w * x),
                                     vec3_mulf(up, h * y)),
@@ -73,7 +102,7 @@ fn @make_fishlens_camera(eye: Vec3, view: Mat3x3, w: f32, h: f32, tmin: f32, tma
     };
 
     Camera {
-        generate_ray = @ |x, y| {
+        generate_ray = @ |x, y, _, _| {
             let nx    = x * xasp;
             let ny    = y * yasp;
             let r	  = math_builtins::sqrt(nx * nx + ny * ny);
