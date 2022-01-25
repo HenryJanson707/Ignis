@@ -1,0 +1,55 @@
+fn @make_ao_renderer() -> PathTracer {
+    let offset:f32 = 0.001;
+
+    PathTracer {
+        on_hit    = @ |_, _, _, _, _, _| Option[(Color)]::None,
+        on_miss   = @ |_, _, _| Option[(Color)]::None,
+        on_shadow = @ |_, _, _, _, _, _, _| Option[(Ray, Color)]::None,
+        on_bounce      = on_bounce,
+        on_shadow_hit  = @ |_, _, _| Option[(Color)]::None,
+        on_shadow_miss = @ |_, _, _| Option[(Color)]::None,
+    }
+
+    fn @on_bounce( ray: Ray
+                 , pixel: i32
+                 , _hit: Hit
+                 , rnd: &mut RndState
+                 , payload: RayPayload
+                 , surf: SurfaceElement
+                 , mat: Material
+                 ) -> Option[(Ray, RayPayload)] {
+        let pt = unrap_ptraypayload(payload);
+        // Russian roulette and maximum depth
+        // let rr_prob = if mat.bsdf.is_specular { 1 } else { russian_roulette(state.contrib, 0.75) };
+        // if state.depth >= max_path_len || randf(rnd) >= rr_prob {
+        //     return(Option[Ray]::None)
+        // }
+
+        aov_stats.splat(pixel, make_color(if pt.depth == 1 { 2 } else { 1 }, 0, 0));
+
+        // Bounce
+        let out_dir = vec3_neg(ray.dir);
+        if let Option[BsdfSample]::Some(mat_sample) = mat.bsdf.sample(rnd, out_dir, false) {
+        let contrib = color_mul(pt.contrib, mat_sample.color/* Pdf and cosine are already applied!*/);
+
+        let rr_prob = if mat.bsdf.is_specular { 1 } else { russian_roulette_pbrt(pt.contrib) };
+        if pt.depth >= max_path_len || randf(rnd) >= rr_prob {
+            return(Option[(Ray, RayPayload)]::None)
+        }
+        
+        let mis = if mat.bsdf.is_specular { 0 } else { 1 / mat_sample.pdf };
+        let new_contrib = color_mulf(contrib, 1 / rr_prob);
+
+        make_option(
+            make_ray(surf.point, mat_sample.in_dir, offset, flt_max),
+            wrap_ptraypayload(PTRayPayload {
+                mis = mis,
+                contrib = new_contrib,
+                depth = pt.depth + 1
+            })
+        )
+        } else {
+        Option[(Ray, RayPayload)]::None
+        }
+    }
+}
