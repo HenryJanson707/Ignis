@@ -19,5 +19,7 @@ struct Device {
     load_aov_image:      fn (i32, i32) -> AOVImage,
     request_buffer:      fn (&[u8], i32) -> DeviceBuffer,
 
-    load_rays: fn () -> &[StreamRay]
+    load_rays: fn () -> &[StreamRay],
+
+    get_film_size:  fn () -> (i32, i32)
 }

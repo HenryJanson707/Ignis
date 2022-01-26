@@ -843,6 +843,13 @@ fn @make_cpu_device(vector_compact: bool, single: bool, min_max: MinMax, vector_
         let mut ptr : &[u8];
         ignis_request_buffer(0, name, &mut ptr, size);
         make_cpu_buffer(ptr)
+    },
+    get_film_size = @ | | {
+        let mut film_pixels : &mut [f32];
+        let mut film_width  : i32;
+        let mut film_height : i32;
+        ignis_get_film_data(0, &mut film_pixels, &mut film_width, &mut film_height);
+        (film_width, film_height)
     }
 };
 

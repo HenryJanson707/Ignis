@@ -2,6 +2,7 @@
 #include "Logger.h"
 #include "loader/Loader.h"
 #include "loader/LoaderTechnique.h"
+#include "loader/LoaderLight.h"
 #include "loader/ShaderUtils.h"
 
 #include <sstream>
@@ -26,9 +27,25 @@ std::string RayGenerationShader::setup(LoaderContext& ctx)
         gen = "make_orthogonal_camera";
     else if (ctx.CameraType == "fishlens" || ctx.CameraType == "fisheye")
         gen = "make_fishlens_camera";
-    else if (ctx.CameraType != "list") {
+    else if (!(ctx.CameraType == "list" || ctx.CameraType == "light")) { //TODO this is a suboptimal way of doing the distinction
         IG_LOG(L_ERROR) << "Unknown camera type '" << ctx.CameraType << "'" << std::endl;
         return {};
+    }
+
+    if(ctx.CameraType == "light"){
+        stream << ShaderUtils::generateDatabase() << std::endl;
+        stream << LoaderLight::generate(ctx, false) << std::endl;
+        stream << "  let (film_width, film_height) = device.get_film_size();" << std::endl;
+        //The Buffer Size is far too big!!
+        stream << "  let buf_size = film_width * film_height * 4 * 32 * 12;" << std::endl; //TODO Find a better to set a max depth
+        stream << "  let buf = device.request_buffer(\"bi\", buf_size);" << std::endl;
+        stream << "  let camera = make_light_camera(" << std::endl;
+        stream << "     settings.tmin," << std::endl;
+        stream << "     settings.tmax," << std::endl;
+        stream << "     buf," << std::endl;
+        stream << "     num_lights," << std::endl;
+        stream << "     lights,"  << std::endl;
+        stream << "     32);" << std::endl;//TODO Find a better to set a max depth
     }
 
     if (!gen.empty()) {

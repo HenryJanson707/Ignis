@@ -1,4 +1,4 @@
-fn @make_ao_renderer(buf: DeviceBuffer) -> PathTracer {
+fn @make_ao_renderer(buf: DeviceBuffer, max_path_len: i32) -> PathTracer {
     let offset:f32 = 0.001;
 
     PathTracer {
@@ -29,7 +29,7 @@ fn @make_ao_renderer(buf: DeviceBuffer) -> PathTracer {
 
         // Bounce
         let out_dir  = vec3_neg(ray.dir);
-        let buf_pos  = 12 * pixel;
+        let buf_pos  = 12 * pixel * max_path_len;
 
         if let Option[BsdfSample]::Some(mat_sample) = mat.bsdf.sample(rnd, out_dir, false) {
             let contrib = color_mul(pt.contrib, mat_sample.color/* Pdf and cosine are already applied!*/);

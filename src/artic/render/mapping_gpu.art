@@ -836,6 +836,13 @@ fn @make_gpu_device( dev_id: i32
         let mut ptr : &[u8];
         ignis_request_buffer(dev_id, name, &mut ptr, size);
         accb(ptr)
+    },
+    get_film_size = @ | | {
+        let mut film_pixels : &mut [f32];
+        let mut film_width  : i32;
+        let mut film_height : i32;
+        ignis_get_film_data(dev_id, &mut film_pixels, &mut film_width, &mut film_height);
+        (film_width, film_height)
     }
 };
 
