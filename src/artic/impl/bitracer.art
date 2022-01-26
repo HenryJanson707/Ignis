@@ -1,4 +1,4 @@
-fn @make_ao_renderer() -> PathTracer {
+fn @make_ao_renderer(buf: DeviceBuffer) -> PathTracer {
     let offset:f32 = 0.001;
 
     PathTracer {
@@ -25,31 +25,41 @@ fn @make_ao_renderer() -> PathTracer {
         //     return(Option[Ray]::None)
         // }
 
-        aov_stats.splat(pixel, make_color(if pt.depth == 1 { 2 } else { 1 }, 0, 0));
+        //aov_stats.splat(pixel, make_color(if pt.depth == 1 { 2 } else { 1 }, 0, 0));
 
         // Bounce
-        let out_dir = vec3_neg(ray.dir);
+        let out_dir  = vec3_neg(ray.dir);
+        let buf_pos  = 12 * pixel;
+
         if let Option[BsdfSample]::Some(mat_sample) = mat.bsdf.sample(rnd, out_dir, false) {
-        let contrib = color_mul(pt.contrib, mat_sample.color/* Pdf and cosine are already applied!*/);
+            let contrib = color_mul(pt.contrib, mat_sample.color/* Pdf and cosine are already applied!*/);
 
-        let rr_prob = if mat.bsdf.is_specular { 1 } else { russian_roulette_pbrt(pt.contrib) };
-        if pt.depth >= max_path_len || randf(rnd) >= rr_prob {
-            return(Option[(Ray, RayPayload)]::None)
-        }
-        
-        let mis = if mat.bsdf.is_specular { 0 } else { 1 / mat_sample.pdf };
-        let new_contrib = color_mulf(contrib, 1 / rr_prob);
+            let rr_prob = if mat.bsdf.is_specular { 1 } else { russian_roulette_pbrt(pt.contrib) };
+            if pt.depth >= max_path_len || randf(rnd) >= rr_prob {
+                buf.store_i32(buf_pos, 0);
+                return(Option[(Ray, RayPayload)]::None)
+            }
+            
+            let mis = if mat.bsdf.is_specular { 0 } else { 1 / mat_sample.pdf };
+            let new_contrib = color_mulf(contrib, 1 / rr_prob);
 
-        make_option(
-            make_ray(surf.point, mat_sample.in_dir, offset, flt_max),
-            wrap_ptraypayload(PTRayPayload {
-                mis = mis,
-                contrib = new_contrib,
-                depth = pt.depth + 1
-            })
-        )
+            buf.store_int2(buf_pos, 1, -1); // We currently have no material index
+            buf.store_f32(buf_pos + 2, 0.0); //TODO where is the PDF?
+            buf.store_vec3(buf_pos + 3, surf.point);
+            buf.store_vec3(buf_pos + 6, mat_sample.in_dir);
+            buf.store_vec3(buf_pos + 9, color_to_vec3(new_contrib));
+
+            make_option(
+                make_ray(surf.point, mat_sample.in_dir, offset, flt_max),
+                wrap_ptraypayload(PTRayPayload {
+                    mis = mis,
+                    contrib = new_contrib,
+                    depth = pt.depth + 1
+                })
+            )
         } else {
-        Option[(Ray, RayPayload)]::None
+            buf.store_i32(buf_pos, 0);
+            Option[(Ray, RayPayload)]::None
         }
     }
 }
