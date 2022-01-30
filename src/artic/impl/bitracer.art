@@ -1,4 +1,4 @@
-fn @make_ao_renderer(buf: DeviceBuffer, max_path_len: i32) -> PathTracer {
+fn @make_bi_renderer(buf: DeviceBuffer, max_path_len: i32) -> PathTracer {
     let offset:f32 = 0.001;
 
     PathTracer {
