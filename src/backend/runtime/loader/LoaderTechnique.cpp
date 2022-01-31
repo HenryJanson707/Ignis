@@ -23,6 +23,11 @@ static void ao_body_loader(std::ostream& stream, const std::string&, const std::
     stream << "  let technique = make_ao_renderer();" << std::endl;
 }
 
+static TechniqueInfo bi_get_info(const std::string&, const std::shared_ptr<Parser::Object>& technique, const LoaderContext&){
+    TechniqueInfo info;
+    info.OverrideCameraGenerator.push_back("light"); //TODO Check if this works???
+}
+
 static void bi_body_loader(std::ostream& stream, const std::string&, const std::shared_ptr<Parser::Object>&, const LoaderContext&)
 {
     stream << "  let (film_width, film_height) = device.get_film_size();" << std::endl;
@@ -124,7 +129,7 @@ static struct TechniqueEntry {
     { "ao", technique_empty_get_info, ao_body_loader, technique_empty_header_loader },
     { "path", path_get_info, path_body_loader, path_header_loader },
     { "debug", technique_empty_get_info, debug_body_loader, technique_empty_header_loader },
-    { "bi", technique_empty_get_info, bi_body_loader, technique_empty_header_loader},
+    { "bi", bi_get_info, bi_body_loader, technique_empty_header_loader},
     { "", nullptr, nullptr, nullptr }
 };
 
