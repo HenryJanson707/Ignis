@@ -36,3 +36,10 @@ build/*
 
 # Python cache
 __pycache__/
+
+# glTF cache
+_ignis_cache*/
+
+# Other outputs
+out/
+data/

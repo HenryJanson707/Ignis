@@ -44,30 +44,35 @@ static void debug_body_loader(std::ostream& stream, const std::string&, const st
 static TechniqueInfo path_get_info(const std::string&, const std::shared_ptr<Parser::Object>& technique, const LoaderContext&)
 {
     TechniqueInfo info;
-    if (technique->property("aov_normals").getBool(false))
-        info.EnabledAOVs.push_back("Normals");
 
-    if (technique->property("aov_mis").getBool(false)) {
-        info.EnabledAOVs.push_back("Direct Weights");
-        info.EnabledAOVs.push_back("NEE Weights");
-        info.UseAdvancedShadowHandling = { true };
+    // Check if we have a proper defined technique
+    // It is totally fine to only define the type by other means then the scene config
+    if (technique) {
+        if (technique->property("aov_normals").getBool(false))
+            info.EnabledAOVs.push_back("Normals");
+
+        if (technique->property("aov_mis").getBool(false)) {
+            info.EnabledAOVs.push_back("Direct Weights");
+            info.EnabledAOVs.push_back("NEE Weights");
+            info.Variants[0].UseAdvancedShadowHandling = true;
+        }
+
+        if (technique->property("aov_stats").getBool(false)) {
+            info.EnabledAOVs.push_back("Stats");
+        }
     }
 
-    if (technique->property("aov_stats").getBool(false)) {
-        info.EnabledAOVs.push_back("Stats");
-    }
-
-    info.UsesLights = { true };
+    info.Variants[0].UsesLights = true;
 
     return info;
 }
 
 static void path_body_loader(std::ostream& stream, const std::string&, const std::shared_ptr<Parser::Object>& technique, const LoaderContext&)
 {
-    const int max_depth     = technique->property("max_depth").getInteger(64);
-    const bool hasNormalAOV = technique->property("aov_normals").getBool(false);
-    const bool hasMISAOV    = technique->property("aov_mis").getBool(false);
-    const bool hasStatsAOV  = technique->property("aov_stats").getBool(false);
+    const int max_depth     = technique ? technique->property("max_depth").getInteger(64) : 64;
+    const bool hasNormalAOV = technique ? technique->property("aov_normals").getBool(false) : false;
+    const bool hasMISAOV    = technique ? technique->property("aov_mis").getBool(false) : false;
+    const bool hasStatsAOV  = technique ? technique->property("aov_stats").getBool(false) : false;
 
     size_t counter = 1;
     if (hasNormalAOV)
@@ -106,9 +111,9 @@ static void path_body_loader(std::ostream& stream, const std::string&, const std
 
 static void path_header_loader(std::ostream& stream, const std::string&, const std::shared_ptr<Parser::Object>&, const LoaderContext&)
 {
-    constexpr int C = 1 /* MIS */ + 3 /* Contrib */ + 1 /* Depth */;
+    constexpr int C = 1 /* MIS */ + 3 /* Contrib */ + 1 /* Depth */ + 1 /* Eta */;
     stream << "static RayPayloadComponents = " << C << ";" << std::endl
-           << "fn init_raypayload() = wrap_ptraypayload(PTRayPayload { mis = 0, contrib = white, depth = 1 });" << std::endl;
+           << "fn init_raypayload() = wrap_ptraypayload(PTRayPayload { mis = 0, contrib = white, depth = 1, eta = 1 });" << std::endl;
 }
 
 // Will return information about the enabled AOVs

@@ -10,6 +10,7 @@ enum NodeChannel {
     NC_RED,
     NC_GREEN,
     NC_BLUE,
+    NC_MEAN
 };
 static inline std::pair<std::string, NodeChannel> escapeTextureName(const std::string& name)
 {
@@ -25,6 +26,8 @@ static inline std::pair<std::string, NodeChannel> escapeTextureName(const std::s
             channel = NC_GREEN;
         else if (channelStr == "b" || channelStr == "z")
             channel = NC_BLUE;
+        else if (channelStr == "m")
+            channel = NC_MEAN;
         else
             IG_LOG(L_WARNING) << "Unknown channel '" << channelStr << "' in node lookup '" << name << "'" << std::endl;
 
@@ -32,21 +35,28 @@ static inline std::pair<std::string, NodeChannel> escapeTextureName(const std::s
     }
 }
 
-ShadingTree::ShadingTree(const std::string& prefix)
-    : mPrefix(prefix)
+ShadingTree::ShadingTree(LoaderContext& ctx, const std::string& prefix)
+    : mContext(ctx)
+    , mPrefix(prefix)
 {
+    beginClosure();
 }
 
-void ShadingTree::addNumber(const std::string& name, const LoaderContext& ctx, const Parser::Object& obj, float def)
+void ShadingTree::addNumber(const std::string& name, const Parser::Object& obj, float def, bool hasDef, InlineMode mode)
 {
-    if (mParameters.count(name) > 0)
+    if (hasParameter(name))
         IG_LOG(L_ERROR) << "Multiple use of parameter '" << name << "'" << std::endl;
 
     const auto prop = obj.property(name);
 
     std::string inline_str;
     switch (prop.type()) {
+    default:
+        IG_LOG(L_ERROR) << "Parameter '" << name << "' has invalid type" << std::endl;
+        [[fallthrough]];
     case Parser::PT_NONE:
+        if (!hasDef)
+            return;
         inline_str = std::to_string(def);
         break;
     case Parser::PT_INTEGER:
@@ -59,12 +69,14 @@ void ShadingTree::addNumber(const std::string& name, const LoaderContext& ctx, c
         break;
     case Parser::PT_STRING: {
         const auto [texName, texChannel] = escapeTextureName(prop.getString());
-        std::string tex_id               = lookupTexture(texName, ctx);
+        std::string tex_id               = lookupTexture(texName, mode);
 
         switch (texChannel) {
         default:
+        case NC_MEAN:
         case NC_NONE:
-            IG_LOG(L_WARNING) << "Parameter '" << name << "' expects a number but a colored texture was given. Using average instead" << std::endl;
+            if (texChannel == NC_NONE)
+                IG_LOG(L_WARNING) << "Parameter '" << name << "' expects a number but a colored texture was given. Using average instead" << std::endl;
             inline_str = "color_average(" + tex_id + ")";
             break;
         case NC_RED:
@@ -78,25 +90,26 @@ void ShadingTree::addNumber(const std::string& name, const LoaderContext& ctx, c
             break;
         }
     } break;
-    default:
-        IG_LOG(L_ERROR) << "Parameter '" << name << "' has invalid type" << std::endl;
-        inline_str = "0";
-        break;
     }
 
-    mParameters[name] = inline_str;
+    currentClosure().Parameters[name] = inline_str;
 }
 
-void ShadingTree::addColor(const std::string& name, const LoaderContext& ctx, const Parser::Object& obj, const Vector3f& def)
+void ShadingTree::addColor(const std::string& name, const Parser::Object& obj, const Vector3f& def, bool hasDef, InlineMode mode)
 {
-    if (mParameters.count(name) > 0)
+    if (hasParameter(name))
         IG_LOG(L_ERROR) << "Multiple use of parameter '" << name << "'" << std::endl;
 
     const auto prop = obj.property(name);
 
     std::string inline_str;
     switch (prop.type()) {
+    default:
+        IG_LOG(L_ERROR) << "Parameter '" << name << "' has invalid type" << std::endl;
+        [[fallthrough]];
     case Parser::PT_NONE:
+        if (!hasDef)
+            return;
         inline_str = "make_color(" + std::to_string(def.x()) + ", " + std::to_string(def.y()) + ", " + std::to_string(def.z()) + ")";
         break;
     case Parser::PT_INTEGER:
@@ -110,12 +123,15 @@ void ShadingTree::addColor(const std::string& name, const LoaderContext& ctx, co
     } break;
     case Parser::PT_STRING: {
         const auto [texName, texChannel] = escapeTextureName(prop.getString());
-        std::string tex_id               = lookupTexture(texName, ctx);
+        std::string tex_id               = lookupTexture(texName, mode);
 
         switch (texChannel) {
         default:
         case NC_NONE:
             inline_str = tex_id;
+            break;
+        case NC_MEAN:
+            inline_str = "make_gray_color(color_average(" + tex_id + "))";
             break;
         case NC_RED:
             inline_str = "make_gray_color(" + tex_id + ".r)";
@@ -128,26 +144,27 @@ void ShadingTree::addColor(const std::string& name, const LoaderContext& ctx, co
             break;
         }
     } break;
-    default:
-        IG_LOG(L_ERROR) << "Parameter '" << name << "' has invalid type" << std::endl;
-        inline_str = "black";
-        break;
     }
 
-    mParameters[name] = inline_str;
+    currentClosure().Parameters[name] = inline_str;
 }
 
 // Only use this if no basic color information suffices
-void ShadingTree::addTexture(const std::string& name, const LoaderContext& ctx, const Parser::Object& obj)
+void ShadingTree::addTexture(const std::string& name, const Parser::Object& obj, bool hasDef, InlineMode mode)
 {
-    if (mParameters.count(name) > 0)
+    if (hasParameter(name))
         IG_LOG(L_ERROR) << "Multiple use of parameter '" << name << "'" << std::endl;
 
     const auto prop = obj.property(name);
 
     std::string inline_str;
     switch (prop.type()) {
+    default:
+        IG_LOG(L_ERROR) << "Parameter '" << name << "' has invalid type" << std::endl;
+        [[fallthrough]];
     case Parser::PT_NONE:
+        if (!hasDef)
+            return;
         inline_str = "make_black_texture()";
         break;
     case Parser::PT_INTEGER:
@@ -161,13 +178,14 @@ void ShadingTree::addTexture(const std::string& name, const LoaderContext& ctx, 
     } break;
     case Parser::PT_STRING: {
         const auto [texName, texChannel] = escapeTextureName(prop.getString());
-        std::string tex_id               = lookupTexture(texName, ctx, false);
+        std::string tex_id               = lookupTexture(texName, mode, false);
 
         switch (texChannel) {
         default:
         case NC_NONE:
             inline_str = tex_id;
             break;
+        // TODO: Mean
         case NC_RED:
             inline_str = "make_channel_texture(" + tex_id + ", 0)";
             break;
@@ -179,13 +197,20 @@ void ShadingTree::addTexture(const std::string& name, const LoaderContext& ctx, 
             break;
         }
     } break;
-    default:
-        IG_LOG(L_ERROR) << "Parameter '" << name << "' has invalid type" << std::endl;
-        inline_str = "make_black_texture()";
-        break;
     }
 
-    mParameters[name] = inline_str;
+    currentClosure().Parameters[name] = inline_str;
+}
+
+void ShadingTree::beginClosure()
+{
+    mClosures.emplace_back();
+}
+
+void ShadingTree::endClosure()
+{
+    IG_ASSERT(mClosures.size() > 1, "Invalid closure end");
+    mClosures.pop_back();
 }
 
 std::string ShadingTree::pullHeader()
@@ -199,23 +224,24 @@ std::string ShadingTree::pullHeader()
 
 std::string ShadingTree::getInline(const std::string& name) const
 {
-    if (mParameters.count(name) > 0)
-        return mParameters.at(name);
+    if (hasParameter(name))
+        return currentClosure().Parameters.at(name);
     IG_LOG(L_ERROR) << "Trying to access unknown parameter '" << name << "'" << std::endl;
     return "";
 }
 
-std::string ShadingTree::lookupTexture(const std::string& name, const LoaderContext& ctx, bool needColor)
+std::string ShadingTree::lookupTexture(const std::string& name, InlineMode mode, bool needColor)
 {
     if (mLoadedTextures.count(name) == 0) {
-        const auto tex = ctx.Scene.texture(name);
+        const auto tex = mContext.Scene.texture(name);
         if (!tex) {
             IG_LOG(L_ERROR) << "Unknown texture '" << name << "'" << std::endl;
             return "pink";
         }
 
-        mHeaderLines.push_back(LoaderTexture::generate(name, *tex, ctx, *this));
+        mHeaderLines.push_back(LoaderTexture::generate(mPrefix + name, *tex, *this));
+        mLoadedTextures.insert(name);
     }
-    return "tex_" + ShaderUtils::escapeIdentifier(name) + (needColor ? "(surf.tex_coords)" : "");
+    return "tex_" + ShaderUtils::escapeIdentifier(mPrefix + name) + (needColor ? (mode == IM_Light ? "(tex_coords)" : "(surf.tex_coords)") : "");
 }
 } // namespace IG

@@ -66,10 +66,9 @@ fn @fresnel_diffuse_factor(eta: f32) -> f32 {
     }
 }
 
-
 fn @schlick_approx(f: f32) -> f32{
-    let s = 1 - f;
-    s * s * s * s * s
+    let s = clampf(1 - f, 0, 1);
+    (s * s) * (s * s) * s
 }
 
 fn @dielectric(absHdotV: f32, eta_i: f32, eta_t: f32)-> f32{
@@ -94,15 +93,22 @@ fn @dielectric(absHdotV: f32, eta_i: f32, eta_t: f32)-> f32{
     (Rparl * Rparl + Rperp * Rperp) / 2
 }
 
-fn @schlick(R0: Color, dot: f32)-> Color{
+fn @schlick(f0: Color, f90: Color, dot: f32)-> Color{
     let s = schlick_approx(dot);
-    let snd = color_mulf(color_add(make_gray_color(1),color_mulf(R0, -1)), s);
-    color_add(R0, snd)
+    let snd = color_mulf(color_sub(f90, f0), s);
+    color_add(f0, snd)
 }
+
+fn @schlick_f(f0: f32, f90: f32, dot: f32) = f0 + (f90 - f0) * schlick_approx(dot);
 
 fn @schlick_from_relative_ior(relative_ior: f32)-> f32{
     let eta1 = math_builtins::sqrt(relative_ior - 1);
     let eta2 = math_builtins::sqrt(relative_ior + 1);
 
     eta1 / eta2
+}
+
+fn @schlick_r0(eta: f32)-> f32{
+    let factor = clampf((eta - 1) / (eta + 1), 0, 1);
+    factor * factor
 }

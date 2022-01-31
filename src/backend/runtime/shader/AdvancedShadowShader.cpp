@@ -4,6 +4,7 @@
 #include "loader/LoaderLight.h"
 #include "loader/LoaderTechnique.h"
 #include "loader/ShaderUtils.h"
+#include "loader/ShadingTree.h"
 
 #include <sstream>
 
@@ -14,6 +15,8 @@ std::string AdvancedShadowShader::setup(bool is_hit, LoaderContext& ctx)
 {
     std::stringstream stream;
 
+    ShadingTree tree(ctx);
+
     stream << LoaderTechnique::generateHeader(ctx) << std::endl;
 
     stream << "#[export] fn ig_advanced_shadow_shader(settings: &Settings, first: i32, last: i32) -> () {" << std::endl
@@ -23,12 +26,12 @@ std::string AdvancedShadowShader::setup(bool is_hit, LoaderContext& ctx)
 
     stream << "  let is_hit = " << (is_hit ? "true" : "false") << ";" << std::endl;
 
-    if (ctx.TechniqueInfo.UsesLights[ctx.CurrentTechniqueVariant]) {
-        bool requireAreaLight = is_hit || ctx.TechniqueInfo.UsesAllLightsInMiss[ctx.CurrentTechniqueVariant];
+    if (ctx.CurrentTechniqueVariantInfo().UsesLights) {
+        bool requireAreaLight = is_hit || ctx.CurrentTechniqueVariantInfo().UsesAllLightsInMiss;
         if (requireAreaLight)
             stream << ShaderUtils::generateDatabase() << std::endl;
 
-        stream << LoaderLight::generate(ctx, !requireAreaLight)
+        stream << LoaderLight::generate(tree, !requireAreaLight)
                << std::endl;
     }
 

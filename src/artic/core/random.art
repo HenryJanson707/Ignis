@@ -47,6 +47,16 @@ fn @make_dir_sample(c: f32, s: f32, phi: f32, pdf: f32) -> DirSample {
     }
 }
 
+fn @scale_dir_sample(sample: DirSample, factor: f32) = DirSample {
+    dir = sample.dir,
+    pdf = sample.pdf * factor
+};
+
+fn @neg_dir_sample(sample: DirSample) = DirSample {
+    dir = vec3_neg(sample.dir),
+    pdf = sample.pdf
+};
+
 // Result of sampling a position
 struct PosSample {
     pos: Vec3,
@@ -65,18 +75,22 @@ fn @spherical_from_dir(dir: Vec3) -> (f32, f32) {
     (theta, phi)
 }
 
+fn @dir_from_spherical(theta: f32, phi: f32) -> Vec3 {
+    let s = math_builtins::sin(theta);
+    let c = math_builtins::cos(theta);
+    let x = s * math_builtins::cos(phi);
+    let y = s * math_builtins::sin(phi);
+    let z = c;
+    make_vec3(x, y, z)
+}
+
 // Samples a point uniformly on a triangle
-fn @sample_triangle(mut u: f32, mut v: f32, v0: Vec3, v1: Vec3, v2: Vec3) -> Vec3 {
+fn @sample_triangle(mut u: f32, mut v: f32) -> (f32, f32) {
     if (u + v > 1) {
         u = 1 - u;
         v = 1 - v;
     }
-    vec3_add(
-        vec3_add(
-            vec3_mulf(v0, 1 - v - u),
-            vec3_mulf(v1, u)),
-        vec3_mulf(v2, v)
-    )
+    (u, v)
 }
 
 // Probability density function for uniform sphere sampling
