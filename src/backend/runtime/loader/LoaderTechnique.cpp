@@ -34,10 +34,10 @@ static TechniqueInfo bi_get_info(const std::string&, const std::shared_ptr<Parse
 static void bi_body_loader(std::ostream& stream, const std::string&, const std::shared_ptr<Parser::Object>&, const LoaderContext&)
 {
     stream << "  let (film_width, film_height) = device.get_film_size();" << std::endl;
-    stream << "  let max_size = 5;" << std::endl;
-    stream << "  let buf_size = film_width * film_height * 4 * max_size * 12;" << std::endl;
+    stream << "  let max_depth = 5;" << std::endl;
+    stream << "  let buf_size = film_width * film_height * 4 * max_depth * 12;" << std::endl;
     stream << "  let buf = device.request_buffer(\"bi\", buf_size);" << std::endl;
-    stream << "  let technique = make_bi_renderer(buf, max_size);" << std::endl;
+    stream << "  let technique = make_bi_renderer(buf, max_depth);" << std::endl;
 }
 
 static void debug_body_loader(std::ostream& stream, const std::string&, const std::shared_ptr<Parser::Object>&, const LoaderContext&)
@@ -154,10 +154,10 @@ static void path_body_loader(std::ostream& stream, const std::string&, const std
         stream << "  let technique = make_path_renderer(" << max_depth << ", num_lights, lights, aovs);" << std::endl;
     }else{
         stream << "  let (film_width, film_height) = device.get_film_size();" << std::endl;
-        stream << "  let max_size = 5;" << std::endl;
-        stream << "  let buf_size = film_width * film_height * 4 * max_size * 12;" << std::endl;
+        stream << "  let max_depth = 5;" << std::endl;
+        stream << "  let buf_size = film_width * film_height * 4 * max_depth * 12;" << std::endl;
         stream << "  let buf = device.request_buffer(\"bi\", buf_size);" << std::endl;
-        stream << "  let technique = make_bi_renderer(buf, max_size);" << std::endl;
+        stream << "  let technique = make_bi_renderer(buf, max_depth);" << std::endl;
     }
 }
 
