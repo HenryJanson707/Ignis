@@ -25,7 +25,7 @@ static void ao_body_loader(std::ostream& stream, const std::string&, const std::
 
 static TechniqueInfo bi_get_info(const std::string&, const std::shared_ptr<Parser::Object>& technique, const LoaderContext&){
     TechniqueInfo info;
-    info.OverrideCameraGenerator.push_back("light"); //TODO Check if this works???
+    //info.OverrideCameraGenerator.push_back("light"); //TODO Check if this works???
 }
 
 static void bi_body_loader(std::ostream& stream, const std::string&, const std::shared_ptr<Parser::Object>&, const LoaderContext&)

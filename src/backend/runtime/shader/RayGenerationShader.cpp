@@ -4,6 +4,7 @@
 #include "loader/LoaderTechnique.h"
 #include "loader/LoaderLight.h"
 #include "loader/ShaderUtils.h"
+#include "loader/ShadingTree.h"
 
 #include <sstream>
 
@@ -34,7 +35,10 @@ std::string RayGenerationShader::setup(LoaderContext& ctx)
 
     if(ctx.CameraType == "light"){
         stream << ShaderUtils::generateDatabase() << std::endl;
-        stream << LoaderLight::generate(ctx, false) << std::endl;
+
+        ShadingTree tree(ctx);
+
+        stream << LoaderLight::generate(tree, false) << std::endl;
         stream << "  let (film_width, film_height) = device.get_film_size();" << std::endl;
         //The Buffer Size is far too big!!
         stream << "  let buf_size = film_width * film_height * 4 * 32 * 12;" << std::endl; //TODO Find a better to set a max depth
