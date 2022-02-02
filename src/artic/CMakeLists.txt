@@ -49,6 +49,7 @@ set(ARTIC_EXTRA_SRC
     ${CMAKE_CURRENT_SOURCE_DIR}/impl/technique/aotracer.art
     ${CMAKE_CURRENT_SOURCE_DIR}/impl/technique/debugtracer.art
     ${CMAKE_CURRENT_SOURCE_DIR}/impl/technique/pathtracer.art
+    ${CMAKE_CURRENT_SOURCE_DIR}/impl/technique/bitracer.art
     ${CMAKE_CURRENT_SOURCE_DIR}/impl/camera.art
     ${CMAKE_CURRENT_SOURCE_DIR}/impl/cdf.art
     ${CMAKE_CURRENT_SOURCE_DIR}/impl/emitter.art

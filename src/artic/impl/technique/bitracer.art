@@ -1,15 +1,6 @@
 fn @make_bi_renderer(buf: DeviceBuffer, max_path_len: i32) -> PathTracer {
     let offset:f32 = 0.001;
 
-    PathTracer {
-        on_hit    = @ |_, _, _, _, _, _| Option[(Color)]::None,
-        on_miss   = @ |_, _, _| Option[(Color)]::None,
-        on_shadow = @ |_, _, _, _, _, _, _| Option[(Ray, Color)]::None,
-        on_bounce      = on_bounce,
-        on_shadow_hit  = @ |_, _, _| Option[(Color)]::None,
-        on_shadow_miss = @ |_, _, _| Option[(Color)]::None,
-    }
-
     fn @on_bounce( ray: Ray
                  , pixel: i32
                  , _hit: Hit
@@ -34,7 +25,7 @@ fn @make_bi_renderer(buf: DeviceBuffer, max_path_len: i32) -> PathTracer {
         if let Option[BsdfSample]::Some(mat_sample) = mat.bsdf.sample(rnd, out_dir, false) {
             let contrib = color_mul(pt.contrib, mat_sample.color/* Pdf and cosine are already applied!*/);
 
-            let rr_prob = if mat.bsdf.is_specular { 1 } else { russian_roulette_pbrt(pt.contrib) };
+            let rr_prob = if mat.bsdf.is_specular { 1 } else { russian_roulette_pbrt(color_mulf(pt.contrib, pt.eta * pt.eta), 0.95) };
             if pt.depth >= max_path_len || randf(rnd) >= rr_prob {
                 buf.store_i32(buf_pos, 0);
                 return(Option[(Ray, RayPayload)]::None)
@@ -54,12 +45,22 @@ fn @make_bi_renderer(buf: DeviceBuffer, max_path_len: i32) -> PathTracer {
                 wrap_ptraypayload(PTRayPayload {
                     mis = mis,
                     contrib = new_contrib,
-                    depth = pt.depth + 1
+                    depth = pt.depth + 1,
+                    eta  = pt.eta * mat_sample.eta
                 })
             )
         } else {
             buf.store_i32(buf_pos, 0);
             Option[(Ray, RayPayload)]::None
         }
+    }
+
+    PathTracer {
+        on_hit    = @ |_, _, _, _, _, _| Option[(Color)]::None,
+        on_miss   = @ |_, _, _| Option[(Color)]::None,
+        on_shadow = @ |_, _, _, _, _, _, _| Option[(Ray, Color)]::None,
+        on_bounce      = on_bounce,
+        on_shadow_hit  = @ |_, _, _| Option[(Color)]::None,
+        on_shadow_miss = @ |_, _, _| Option[(Color)]::None,
     }
 }

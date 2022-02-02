@@ -34,9 +34,10 @@ static TechniqueInfo bi_get_info(const std::string&, const std::shared_ptr<Parse
 static void bi_body_loader(std::ostream& stream, const std::string&, const std::shared_ptr<Parser::Object>&, const LoaderContext&)
 {
     stream << "  let (film_width, film_height) = device.get_film_size();" << std::endl;
-    stream << "  let buf_size = film_width * film_height * 4 * 32 * 12;" << std::endl;
+    stream << "  let max_size = 5;" << std::endl;
+    stream << "  let buf_size = film_width * film_height * 4 * max_size * 12;" << std::endl;
     stream << "  let buf = device.request_buffer(\"bi\", buf_size);" << std::endl;
-    stream << "  let technique = make_bi_renderer(buf);" << std::endl;
+    stream << "  let technique = make_bi_renderer(buf, max_size);" << std::endl;
 }
 
 static void debug_body_loader(std::ostream& stream, const std::string&, const std::shared_ptr<Parser::Object>&, const LoaderContext&)
@@ -47,6 +48,8 @@ static void debug_body_loader(std::ostream& stream, const std::string&, const st
 static TechniqueInfo path_get_info(const std::string&, const std::shared_ptr<Parser::Object>& technique, const LoaderContext&)
 {
     TechniqueInfo info;
+
+    info.Variants.resize(2);
 
     // Check if we have a proper defined technique
     // It is totally fine to only define the type by other means then the scene config
@@ -65,7 +68,7 @@ static TechniqueInfo path_get_info(const std::string&, const std::shared_ptr<Par
         }
     }
     
-    auto light_camera = [] (const LoaderContext& ctx){
+    auto light_camera = [] (LoaderContext& ctx){
         std::stringstream stream;
         stream << LoaderTechnique::generateHeader(ctx, true) << std::endl;
 
@@ -80,7 +83,8 @@ static TechniqueInfo path_get_info(const std::string&, const std::shared_ptr<Par
         stream << LoaderLight::generate(tree, false) << std::endl;
         stream << "  let (film_width, film_height) = device.get_film_size();" << std::endl;
         //The Buffer Size is far too big!!
-        stream << "  let buf_size = film_width * film_height * 4 * 32 * 12;" << std::endl; //TODO Find a better to set a max depth
+        stream << "  let max_depth = 5;" << std::endl;
+        stream << "  let buf_size = film_width * film_height * 4 * max_depth * 12;" << std::endl; //TODO Find a better to set a max depth
         stream << "  let buf = device.request_buffer(\"bi\", buf_size);" << std::endl;
         stream << "  let camera = make_light_camera(" << std::endl;
         stream << "     settings.tmin," << std::endl;
@@ -88,7 +92,7 @@ static TechniqueInfo path_get_info(const std::string&, const std::shared_ptr<Par
         stream << "     buf," << std::endl;
         stream << "     num_lights," << std::endl;
         stream << "     lights,"  << std::endl;
-        stream << "     32);" << std::endl;//TODO Find a better to set a max depth
+        stream << "     max_depth);" << std::endl;//TODO Find a better to set a max depth
 
         stream << "  let spp = " << ctx.SamplesPerIteration << " : i32;" << std::endl;
         IG_ASSERT(!gen.empty(), "Generator function can not be empty!");
@@ -101,52 +105,60 @@ static TechniqueInfo path_get_info(const std::string&, const std::shared_ptr<Par
     };
 
 
-    info.Variants[0].OverrideCameraGenerator = light_camera;
+    info.Variants[1].OverrideCameraGenerator = light_camera;
     info.Variants[0].UsesLights = true;
 
     return info;
 }
 
-static void path_body_loader(std::ostream& stream, const std::string&, const std::shared_ptr<Parser::Object>& technique, const LoaderContext&)
+static void path_body_loader(std::ostream& stream, const std::string&, const std::shared_ptr<Parser::Object>& technique, const LoaderContext& ctx)
 {
     const int max_depth     = technique ? technique->property("max_depth").getInteger(64) : 64;
     const bool hasNormalAOV = technique ? technique->property("aov_normals").getBool(false) : false;
     const bool hasMISAOV    = technique ? technique->property("aov_mis").getBool(false) : false;
     const bool hasStatsAOV  = technique ? technique->property("aov_stats").getBool(false) : false;
+    
+    if(ctx.CurrentTechniqueVariant == 0){
+        size_t counter = 1;
+        if (hasNormalAOV)
+            stream << "  let aov_normals = device.load_aov_image(" << counter++ << ", spp);" << std::endl;
 
-    size_t counter = 1;
-    if (hasNormalAOV)
-        stream << "  let aov_normals = device.load_aov_image(" << counter++ << ", spp);" << std::endl;
+        if (hasMISAOV) {
+            stream << "  let aov_di = device.load_aov_image(" << counter++ << ", spp);" << std::endl;
+            stream << "  let aov_nee = device.load_aov_image(" << counter++ << ", spp);" << std::endl;
+        }
 
-    if (hasMISAOV) {
-        stream << "  let aov_di = device.load_aov_image(" << counter++ << ", spp);" << std::endl;
-        stream << "  let aov_nee = device.load_aov_image(" << counter++ << ", spp);" << std::endl;
+        if (hasStatsAOV)
+            stream << "  let aov_stats = device.load_aov_image(" << counter++ << ", spp);" << std::endl;
+
+        stream << "  let aovs = @|id:i32| -> AOVImage {" << std::endl
+            << "    match(id) {" << std::endl;
+
+        // TODO: We do not support constants in match (or any other useful location)!!!!!!!!!
+        // This is completely unnecessary... we have to fix artic for that......
+        if (hasNormalAOV)
+            stream << "      1 => aov_normals," << std::endl;
+
+        if (hasMISAOV) {
+            stream << "      2 => aov_di," << std::endl
+                << "      3 => aov_nee," << std::endl;
+        }
+
+        if (hasStatsAOV)
+            stream << "      4 => aov_stats," << std::endl;
+
+        stream << "      _ => make_empty_aov_image()" << std::endl
+            << "    }" << std::endl
+            << "  };" << std::endl;
+
+        stream << "  let technique = make_path_renderer(" << max_depth << ", num_lights, lights, aovs);" << std::endl;
+    }else{
+        stream << "  let (film_width, film_height) = device.get_film_size();" << std::endl;
+        stream << "  let max_size = 5;" << std::endl;
+        stream << "  let buf_size = film_width * film_height * 4 * max_size * 12;" << std::endl;
+        stream << "  let buf = device.request_buffer(\"bi\", buf_size);" << std::endl;
+        stream << "  let technique = make_bi_renderer(buf, max_size);" << std::endl;
     }
-
-    if (hasStatsAOV)
-        stream << "  let aov_stats = device.load_aov_image(" << counter++ << ", spp);" << std::endl;
-
-    stream << "  let aovs = @|id:i32| -> AOVImage {" << std::endl
-           << "    match(id) {" << std::endl;
-
-    // TODO: We do not support constants in match (or any other useful location)!!!!!!!!!
-    // This is completely unnecessary... we have to fix artic for that......
-    if (hasNormalAOV)
-        stream << "      1 => aov_normals," << std::endl;
-
-    if (hasMISAOV) {
-        stream << "      2 => aov_di," << std::endl
-               << "      3 => aov_nee," << std::endl;
-    }
-
-    if (hasStatsAOV)
-        stream << "      4 => aov_stats," << std::endl;
-
-    stream << "      _ => make_empty_aov_image()" << std::endl
-           << "    }" << std::endl
-           << "  };" << std::endl;
-
-    stream << "  let technique = make_path_renderer(" << max_depth << ", num_lights, lights, aovs);" << std::endl;
 }
 
 static void path_header_loader(std::ostream& stream, const std::string&, const std::shared_ptr<Parser::Object>&, const LoaderContext&)
