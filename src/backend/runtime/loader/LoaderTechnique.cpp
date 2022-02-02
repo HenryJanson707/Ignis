@@ -1,5 +1,8 @@
 #include "LoaderTechnique.h"
 #include "Loader.h"
+#include "LoaderLight.h"
+#include "ShaderUtils.h"
+#include "ShadingTree.h"
 #include "Logger.h"
 #include "serialization/VectorSerializer.h"
 
@@ -61,7 +64,44 @@ static TechniqueInfo path_get_info(const std::string&, const std::shared_ptr<Par
             info.EnabledAOVs.push_back("Stats");
         }
     }
+    
+    auto light_camera = [] (const LoaderContext& ctx){
+        std::stringstream stream;
+        stream << LoaderTechnique::generateHeader(ctx, true) << std::endl;
 
+        stream << "#[export] fn ig_ray_generation_shader(settings: &Settings, iter: i32, id: &mut i32, size: i32, xmin: i32, ymin: i32, xmax: i32, ymax: i32) -> i32 {" << std::endl;
+        stream << "  " << ShaderUtils::constructDevice(ctx.Target) << std::endl;
+        stream << std::endl;
+
+        stream << ShaderUtils::generateDatabase() << std::endl;
+
+        ShadingTree tree(ctx);
+
+        stream << LoaderLight::generate(tree, false) << std::endl;
+        stream << "  let (film_width, film_height) = device.get_film_size();" << std::endl;
+        //The Buffer Size is far too big!!
+        stream << "  let buf_size = film_width * film_height * 4 * 32 * 12;" << std::endl; //TODO Find a better to set a max depth
+        stream << "  let buf = device.request_buffer(\"bi\", buf_size);" << std::endl;
+        stream << "  let camera = make_light_camera(" << std::endl;
+        stream << "     settings.tmin," << std::endl;
+        stream << "     settings.tmax," << std::endl;
+        stream << "     buf," << std::endl;
+        stream << "     num_lights," << std::endl;
+        stream << "     lights,"  << std::endl;
+        stream << "     32);" << std::endl;//TODO Find a better to set a max depth
+
+        stream << "  let spp = " << ctx.SamplesPerIteration << " : i32;" << std::endl;
+        IG_ASSERT(!gen.empty(), "Generator function can not be empty!");
+        stream << "  let emitter = make_camera_emitter(camera, iter, spp, make_uniform_pixel_sampler()/*make_mjitt_pixel_sampler(4,4)*/, init_raypayload);" << std::endl;
+
+        stream << "  device.generate_rays(emitter, id, size, xmin, ymin, xmax, ymax, spp)" << std::endl
+        << "}" << std::endl;
+
+        return stream.str();
+    };
+
+
+    info.Variants[0].OverrideCameraGenerator = light_camera;
     info.Variants[0].UsesLights = true;
 
     return info;
