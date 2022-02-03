@@ -67,6 +67,12 @@ static TechniqueInfo path_get_info(const std::string&, const std::shared_ptr<Par
             info.EnabledAOVs.push_back("Stats");
         }
     }
+
+    auto variant_selector = [](uint32 i){
+        return i % 2; //TODO this is only true if we begin with zero
+    };
+
+    info.VariantSelector = variant_selector;
     
     auto light_camera = [] (LoaderContext& ctx){
         std::stringstream stream;
