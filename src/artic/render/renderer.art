@@ -1,4 +1,5 @@
 struct PathTracer {
+    on_bi:               fn (Ray, i32, Hit, &mut RndState, RayPayload, SurfaceElement, Material) -> Option[(Ray, Color)],
     on_hit:              fn (Ray, i32, Hit, RayPayload, SurfaceElement, Material) -> Option[Color],
     on_miss:             fn (Ray, i32, RayPayload) -> Option[Color],
     on_shadow:           fn (Ray, i32, Hit, &mut RndState, RayPayload, SurfaceElement, Material) -> Option[(Ray, Color)],

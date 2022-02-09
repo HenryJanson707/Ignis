@@ -34,10 +34,10 @@ static TechniqueInfo bi_get_info(const std::string&, const std::shared_ptr<Parse
 static void bi_body_loader(std::ostream& stream, const std::string&, const std::shared_ptr<Parser::Object>&, const LoaderContext&)
 {
     stream << "  let (film_width, film_height) = device.get_film_size();" << std::endl;
-    stream << "  let max_depth = 5;" << std::endl;
-    stream << "  let buf_size = film_width * film_height * 4 * max_depth * 12;" << std::endl;
+    stream << "  let max_depth_light = 5;" << std::endl;
+    stream << "  let buf_size = film_width * film_height * 4 * max_depth_light * 12;" << std::endl;
     stream << "  let buf = device.request_buffer(\"bi\", buf_size);" << std::endl;
-    stream << "  let technique = make_bi_renderer(buf, max_depth);" << std::endl;
+    stream << "  let technique = make_bi_renderer(buf, max_depth_light);" << std::endl;
 }
 
 static void debug_body_loader(std::ostream& stream, const std::string&, const std::shared_ptr<Parser::Object>&, const LoaderContext&)
@@ -89,8 +89,8 @@ static TechniqueInfo path_get_info(const std::string&, const std::shared_ptr<Par
         stream << LoaderLight::generate(tree, false) << std::endl;
         stream << "  let (film_width, film_height) = device.get_film_size();" << std::endl;
         //The Buffer Size is far too big!!
-        stream << "  let max_depth = 5;" << std::endl;
-        stream << "  let buf_size = film_width * film_height * 4 * max_depth * 12;" << std::endl; //TODO Find a better to set a max depth
+        stream << "  let max_depth_light = 5;" << std::endl;
+        stream << "  let buf_size = film_width * film_height * 4 * max_depth_light * 12;" << std::endl; //TODO Find a better to set a max depth
         stream << "  let buf = device.request_buffer(\"bi\", buf_size);" << std::endl;
         stream << "  let camera = make_light_camera(" << std::endl;
         stream << "     settings.tmin," << std::endl;
@@ -98,7 +98,7 @@ static TechniqueInfo path_get_info(const std::string&, const std::shared_ptr<Par
         stream << "     buf," << std::endl;
         stream << "     num_lights," << std::endl;
         stream << "     lights,"  << std::endl;
-        stream << "     max_depth);" << std::endl;//TODO Find a better to set a max depth
+        stream << "     max_depth_light);" << std::endl;//TODO Find a better to set a max depth
 
         stream << "  let spp = " << ctx.SamplesPerIteration << " : i32;" << std::endl;
         IG_ASSERT(!gen.empty(), "Generator function can not be empty!");
@@ -119,6 +119,11 @@ static TechniqueInfo path_get_info(const std::string&, const std::shared_ptr<Par
 
 static void path_body_loader(std::ostream& stream, const std::string&, const std::shared_ptr<Parser::Object>& technique, const LoaderContext& ctx)
 {
+    stream << "  let (film_width, film_height) = device.get_film_size();" << std::endl;
+    stream << "  let max_depth_light = 5;" << std::endl;
+    stream << "  let buf_size = film_width * film_height * 4 * max_depth_light * 12;" << std::endl;
+    stream << "  let buf = device.request_buffer(\"bi\", buf_size);" << std::endl;
+
     const int max_depth     = technique ? technique->property("max_depth").getInteger(64) : 64;
     const bool hasNormalAOV = technique ? technique->property("aov_normals").getBool(false) : false;
     const bool hasMISAOV    = technique ? technique->property("aov_mis").getBool(false) : false;
@@ -157,13 +162,9 @@ static void path_body_loader(std::ostream& stream, const std::string&, const std
             << "    }" << std::endl
             << "  };" << std::endl;
 
-        stream << "  let technique = make_path_renderer(" << max_depth << ", num_lights, lights, aovs);" << std::endl;
+        stream << "  let technique = make_path_renderer(" << max_depth << ", num_lights, lights, aovs, buf, max_depth_light);" << std::endl;
     }else{
-        stream << "  let (film_width, film_height) = device.get_film_size();" << std::endl;
-        stream << "  let max_depth = 5;" << std::endl;
-        stream << "  let buf_size = film_width * film_height * 4 * max_depth * 12;" << std::endl;
-        stream << "  let buf = device.request_buffer(\"bi\", buf_size);" << std::endl;
-        stream << "  let technique = make_bi_renderer(buf, max_depth);" << std::endl;
+        stream << "  let technique = make_bi_renderer(buf, max_depth_light);" << std::endl;
     }
 }
 

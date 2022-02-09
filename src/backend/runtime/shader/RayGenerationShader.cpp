@@ -41,8 +41,8 @@ std::string RayGenerationShader::setup(LoaderContext& ctx)
         stream << LoaderLight::generate(tree, false) << std::endl;
         stream << "  let (film_width, film_height) = device.get_film_size();" << std::endl;
         //The Buffer Size is far too big!!
-        stream << "  let max_depth = 5;" << std::endl;
-        stream << "  let buf_size = film_width * film_height * 4 * max_depth * 12;" << std::endl; //TODO Find a better to set a max depth
+        stream << "  let max_depth_light = 5;" << std::endl;
+        stream << "  let buf_size = film_width * film_height * 4 * max_depth_light * 12;" << std::endl; //TODO Find a better to set a max depth
         stream << "  let buf = device.request_buffer(\"bi\", buf_size);" << std::endl;
         stream << "  let camera = make_light_camera(" << std::endl;
         stream << "     settings.tmin," << std::endl;
@@ -50,7 +50,7 @@ std::string RayGenerationShader::setup(LoaderContext& ctx)
         stream << "     buf," << std::endl;
         stream << "     num_lights," << std::endl;
         stream << "     lights,"  << std::endl;
-        stream << "     max_depth);" << std::endl;//TODO Find a better to set a max depth
+        stream << "     max_depth_light);" << std::endl;//TODO Find a better to set a max depth
     }
 
     if (!gen.empty()) {
