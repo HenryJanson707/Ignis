@@ -1,4 +1,4 @@
-# Ignis
+# Ignis ![Build](https://img.shields.io/github/workflow/status/PearCoding/Ignis/Docker%20AVX2) [![Docker Pulls](https://img.shields.io/docker/pulls/pearcoding/ignis)](https://hub.docker.com/repository/docker/pearcoding/ignis)
 'Ignis' is a raytracer for the RENEGADE project implemented using the Artic frontend of the AnyDSL compiler framework (https://anydsl.github.io/) and based on Rodent (https://github.com/AnyDSL/rodent).
 
 ![A scene containing diamonds rendered by Ignis](docs/screenshot.jpg)
@@ -37,6 +37,12 @@ Have a look at [CPM](https://github.com/cpm-cmake/CPM.cmake) for more informatio
  - tinyobjloader <https://github.com/tinyobjloader/tinyobjloader>
  - tinyparser-mitsuba <https://github.com/PearCoding/TinyParser-Mitsuba>
 
+## Docker Image
+
+Ignis is available on docker hub with some preconfigured backends! [pearcoding/ignis](https://hub.docker.com/repository/docker/pearcoding/ignis)
+
+More information is available here [docker/README.md](docker/README.md)
+
 ## Building
 
 If you made sure the required dependencies are installed in your system, create a directory to build the application in:
@@ -53,7 +59,7 @@ If `Ninja` is not available, skip the `-G Ninja` parameter. You can also set `FE
 
 ## Backends
 
-The raytracer as multiple backends available to make sure the best optimized kernel is used for certain tasks. Therefore, multiple device and feature specific modules, so-called drivers, have to be compiled.
+The raytracer has multiple backends available to make sure the best optimized kernel is used for certain tasks. Therefore, multiple device and feature specific modules, so-called drivers, have to be compiled.
 
 The compilation process might take a while depending on your hardware and feature selection. Parallel compilation of the drivers is disabled by default. Multithreading might freeze your operating system due to the high memory and cpu use. You can use the CMake option `IG_BUILD_DRIVER_PARALLEL` to enable it if you are sure your system can handle it.
 
@@ -94,6 +100,8 @@ A schema is available at [refs/ignis.schema.json](refs/ignis.schema.json)
 You might use the `mts2ig` to convert a Mitsuba scene description to our own format. Keep in mind that this feature is very experimental and not all BSDFs work out of the box.
 
 You can also use `rad2json` to convert geometry used in the Radiance framework to our tool. Keep in mind that no BSDF and lights are mapped as the two raytracers are vastile different in these regards.
+
+Ignis is able to understand glTF files. You can embed glTF files in Ignis's own scene description file or directly use the glTF file as an input to the multiple frontends.
 
 A Blender plugin is planned for the future.
 

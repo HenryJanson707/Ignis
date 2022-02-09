@@ -72,6 +72,17 @@ std::string ShaderUtils::escapeIdentifier(const std::string& name)
     return copy;
 }
 
+std::string ShaderUtils::inlineMatrix(const Matrix3f& mat)
+{
+    if (mat.isIdentity()) {
+        return "mat3x3_identity()";
+    } else {
+        std::stringstream stream;
+        stream << "make_mat3x3(" << inlineVector(mat.col(0)) << ", " << inlineVector(mat.col(1)) << ", " << inlineVector(mat.col(2)) << ")";
+        return stream.str();
+    }
+}
+
 std::string ShaderUtils::inlineVector(const Vector3f& pos)
 {
     std::stringstream stream;
@@ -82,7 +93,7 @@ std::string ShaderUtils::inlineVector(const Vector3f& pos)
 std::string ShaderUtils::inlineColor(const Vector3f& color)
 {
     std::stringstream stream;
-    stream << "make_color(" << color.x() << ", " << color.y() << ", " << color.z() << ")";
+    stream << "make_color(" << color.x() << ", " << color.y() << ", " << color.z() << ", 1)";
     return stream.str();
 }
 } // namespace IG

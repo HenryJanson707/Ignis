@@ -7,6 +7,7 @@ set(ARTIC_MAIN_SRC
     ${CMAKE_CURRENT_SOURCE_DIR}/core/random.art
     ${CMAKE_CURRENT_SOURCE_DIR}/core/sort.art
     ${CMAKE_CURRENT_SOURCE_DIR}/core/vector.art
+    ${CMAKE_CURRENT_SOURCE_DIR}/core/warp.art
     ${CMAKE_CURRENT_SOURCE_DIR}/render/aov.art
     ${CMAKE_CURRENT_SOURCE_DIR}/render/bsdf.art
     ${CMAKE_CURRENT_SOURCE_DIR}/render/buffer.art
@@ -41,11 +42,17 @@ set(ARTIC_EXTRA_SRC
     ${CMAKE_CURRENT_SOURCE_DIR}/impl/bsdf/diffuse.art
     ${CMAKE_CURRENT_SOURCE_DIR}/impl/bsdf/klems.art
     ${CMAKE_CURRENT_SOURCE_DIR}/impl/bsdf/map.art
-    ${CMAKE_CURRENT_SOURCE_DIR}/impl/bsdf/metal.art
     ${CMAKE_CURRENT_SOURCE_DIR}/impl/bsdf/mix.art
     ${CMAKE_CURRENT_SOURCE_DIR}/impl/bsdf/phong.art
     ${CMAKE_CURRENT_SOURCE_DIR}/impl/bsdf/plastic.art
     ${CMAKE_CURRENT_SOURCE_DIR}/impl/bsdf/principled.art
+    ${CMAKE_CURRENT_SOURCE_DIR}/impl/bsdf/tensortree.art
+    ${CMAKE_CURRENT_SOURCE_DIR}/impl/light/area.art
+    ${CMAKE_CURRENT_SOURCE_DIR}/impl/light/cie.art
+    ${CMAKE_CURRENT_SOURCE_DIR}/impl/light/common.art
+    ${CMAKE_CURRENT_SOURCE_DIR}/impl/light/env.art
+    ${CMAKE_CURRENT_SOURCE_DIR}/impl/light/mix.art
+    ${CMAKE_CURRENT_SOURCE_DIR}/impl/light/sun.art
     ${CMAKE_CURRENT_SOURCE_DIR}/impl/technique/aotracer.art
     ${CMAKE_CURRENT_SOURCE_DIR}/impl/technique/debugtracer.art
     ${CMAKE_CURRENT_SOURCE_DIR}/impl/technique/pathtracer.art
@@ -55,7 +62,6 @@ set(ARTIC_EXTRA_SRC
     ${CMAKE_CURRENT_SOURCE_DIR}/impl/emitter.art
     ${CMAKE_CURRENT_SOURCE_DIR}/impl/fresnel.art
     ${CMAKE_CURRENT_SOURCE_DIR}/impl/interval.art
-    ${CMAKE_CURRENT_SOURCE_DIR}/impl/light.art
     ${CMAKE_CURRENT_SOURCE_DIR}/impl/microfacet.art
     ${CMAKE_CURRENT_SOURCE_DIR}/impl/pixel_sampler.art
     ${CMAKE_CURRENT_SOURCE_DIR}/impl/shading.art

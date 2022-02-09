@@ -1,0 +1,8 @@
+{
+	"externals": [
+		{"filename": "room_data.json"}
+	],
+	"bsdfs": [
+		{"type":"tensortree", "name": "window", "filename":"radiance/simple_tensor_d2_trans.xml"}
+	]
+}

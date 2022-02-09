@@ -369,7 +369,8 @@ fn @cpu_hit_shade(entity_id: i32, primary: &PrimaryStream, secondary: &Secondary
                     make_color(
                         rv_extract(hit_color.r, lane),
                         rv_extract(hit_color.g, lane),
-                        rv_extract(hit_color.b, lane)
+                        rv_extract(hit_color.b, lane),
+                        1
                     )
                 );
             }
@@ -434,7 +435,8 @@ fn @cpu_miss_shade(primary: &PrimaryStream, path_tracer: PathTracer, accumulate:
                     make_color(
                         rv_extract(hit_color.r, lane),
                         rv_extract(hit_color.g, lane),
-                        rv_extract(hit_color.b, lane)
+                        rv_extract(hit_color.b, lane),
+                        1
                     )
                 );
             }
@@ -479,7 +481,8 @@ fn @cpu_advanced_shadow(is_hit: bool, secondary: &SecondaryStream, path_tracer: 
                         make_color(
                             rv_extract(new_color.r, lane),
                             rv_extract(new_color.g, lane),
-                            rv_extract(new_color.b, lane)
+                            rv_extract(new_color.b, lane),
+                            1
                         )
                     );
                 }
@@ -520,7 +523,8 @@ fn @cpu_get_aov_image(id: i32, spp: i32) -> AOVImage {
                     make_color(
                         rv_extract(color.r, lane),
                         rv_extract(color.g, lane),
-                        rv_extract(color.b, lane)
+                        rv_extract(color.b, lane),
+                        1
                     )
                 );
             }
@@ -656,7 +660,8 @@ fn @cpu_trace( scene: SceneGeometry
                                     make_color(
                                         secondary.color_r(i),
                                         secondary.color_g(i),
-                                        secondary.color_b(i)
+                                        secondary.color_b(i),
+                                        1
                                     )
                                 );
                             }

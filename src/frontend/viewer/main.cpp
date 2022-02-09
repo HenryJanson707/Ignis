@@ -65,6 +65,9 @@ static inline void usage()
         << "           --gpu                  Use autodetected GPU target" << std::endl
         << "           --debug                Same as --technique debug" << std::endl
         << "           --spp       spp        Enables benchmarking mode and sets the number of iterations based on the given spp" << std::endl
+#ifdef WITH_UI
+        << "           --cap-spp   spp        Do not render any further than the given spp for the current view" << std::endl
+#endif
         << "           --stats                Acquire useful stats alongside rendering. Will be dumped at the end of the rendering session" << std::endl
         << "           --full-stats           Acquire all stats alongside rendering. Will be dumped at the end of the rendering session" << std::endl
         << "   -o      --output    image.exr  Writes the output image to a file" << std::endl
@@ -97,8 +100,7 @@ int main(int argc, char** argv)
     std::string in_file;
     std::string out_file;
     size_t desired_spp = 0;
-    std::optional<int> a_film_width;
-    std::optional<int> a_film_height;
+    size_t capped_spp  = 0; // Cap the SPP to the desired amount and do not render any further. Only useful for ui
     std::optional<Vector3f> eye;
     std::optional<Vector3f> dir;
     std::optional<Vector3f> up;
@@ -114,11 +116,11 @@ int main(int argc, char** argv)
         if (argv[i][0] == '-') {
             if (!strcmp(argv[i], "--width")) {
                 check_arg(argc, argv, i, 1);
-                a_film_width = strtoul(argv[i + 1], nullptr, 10);
+                opts.OverrideFilmSize.first = strtoul(argv[i + 1], nullptr, 10);
                 ++i;
             } else if (!strcmp(argv[i], "--height")) {
                 check_arg(argc, argv, i, 1);
-                a_film_height = strtoul(argv[i + 1], nullptr, 10);
+                opts.OverrideFilmSize.second = strtoul(argv[i + 1], nullptr, 10);
                 ++i;
             } else if (!strcmp(argv[i], "--eye")) {
                 check_arg(argc, argv, i, 3);
@@ -179,6 +181,11 @@ int main(int argc, char** argv)
             } else if (!strcmp(argv[i], "--spi")) {
                 check_arg(argc, argv, i, 1);
                 opts.SPI = (size_t)strtoul(argv[++i], nullptr, 10);
+#ifdef WITH_UI
+            } else if (!strcmp(argv[i], "--cap-spp")) {
+                check_arg(argc, argv, i, 1);
+                capped_spp = (size_t)strtoul(argv[++i], nullptr, 10);
+#endif
             } else if (!strcmp(argv[i], "-o")) {
                 check_arg(argc, argv, i, 1);
                 ++i;
@@ -264,16 +271,15 @@ int main(int argc, char** argv)
     timer_loading.stop();
 
     const auto def        = runtime->loadedRenderSettings();
-    const int film_width  = a_film_width.value_or(def.FilmWidth);
-    const int film_height = a_film_height.value_or(def.FilmHeight);
     const auto clip       = trange.value_or(Vector2f(def.TMin, def.TMax));
     Camera camera(eye.value_or(def.CameraEye), dir.value_or(def.CameraDir), up.value_or(def.CameraUp),
-                  fov.value_or(def.FOV), (float)film_width / (float)film_height,
+                  fov.value_or(def.FOV), (float)def.FilmWidth / (float)def.FilmHeight,
                   clip(0), clip(1));
-    runtime->setup(film_width, film_height);
+    runtime->setup();
 
     const size_t SPI          = runtime->samplesPerIteration();
-    const size_t desired_iter = static_cast<size_t>(std::ceil(desired_spp / SPI));
+    const size_t desired_iter = static_cast<size_t>(std::ceil(desired_spp / (float)SPI));
+    const size_t capped_iter  = static_cast<size_t>(std::ceil(capped_spp / (float)SPI));
 
 #ifdef WITH_UI
     IG_UNUSED(prettyConsole);
@@ -291,7 +297,7 @@ int main(int argc, char** argv)
             else
                 aov_names[i] = runtime->aovs()[i - 1];
         }
-        ui = std::make_unique<UI>(film_width, film_height, aovs, aov_names, runtime->isDebug());
+        ui = std::make_unique<UI>(def.FilmWidth, def.FilmHeight, aovs, aov_names, runtime->isDebug());
 
         // Setup initial travelspeed
         BoundingBox bbox = runtime->sceneBoundingBox();
@@ -339,39 +345,49 @@ int main(int argc, char** argv)
 #endif
 
         if (running) {
-            if (iter == 0)
-                runtime->clearFramebuffer();
+            if (capped_iter <= 0 || iter < capped_iter) {
+                if (iter == 0)
+                    runtime->clearFramebuffer();
 
-            auto ticks = std::chrono::high_resolution_clock::now();
+                auto ticks = std::chrono::high_resolution_clock::now();
 
-            timer_render.start();
-            runtime->step(camera);
-            timer_render.stop();
+                timer_render.start();
+                runtime->step(camera);
+                timer_render.stop();
 
-            iter++;
-            auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - ticks).count();
+                iter++;
+                auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - ticks).count();
 
-            if (desired_iter != 0) {
-                samples_sec.emplace_back(1000.0 * double(SPI * film_width * film_height) / double(elapsed_ms));
-                if (samples_sec.size() == desired_iter)
-                    break;
-            }
+                if (desired_iter != 0) {
+                    samples_sec.emplace_back(1000.0 * double(SPI * def.FilmWidth * def.FilmHeight) / double(elapsed_ms));
+                    if (samples_sec.size() == desired_iter)
+                        break;
+                }
 
-            frames++;
-            timing += elapsed_ms;
-            if (frames > 10 || timing >= 2000) {
+                frames++;
+                timing += elapsed_ms;
+                if (frames > 10 || timing >= 2000) {
 #ifdef WITH_UI
-                const double frames_sec = double(frames) * 1000.0 / double(timing);
+                    const double frames_sec = double(frames) * 1000.0 / double(timing);
 
+                    std::ostringstream os;
+                    os << "Ignis [" << frames_sec << " FPS, "
+                       << frames_sec * SPI << " SPS, "
+                       << iter * SPI << " "
+                       << "sample" << (iter * SPI > 1 ? "s" : "") << "]";
+                    ui->setTitle(os.str().c_str());
+#endif
+                    frames = 0;
+                    timing = 0;
+                }
+            } else {
+#ifdef WITH_UI
                 std::ostringstream os;
-                os << "Ignis [" << frames_sec << " FPS, "
-                   << frames_sec * SPI << " SPS, "
+                os << "Ignis [Capped, "
                    << iter * SPI << " "
                    << "sample" << (iter * SPI > 1 ? "s" : "") << "]";
                 ui->setTitle(os.str().c_str());
 #endif
-                frames = 0;
-                timing = 0;
             }
         } else {
             frames++;

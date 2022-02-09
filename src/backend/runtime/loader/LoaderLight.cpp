@@ -164,7 +164,6 @@ static void light_area(std::ostream& stream, const std::string& name, const std:
 
 static void light_directional(std::ostream& stream, const std::string& name, const std::shared_ptr<Parser::Object>& light, ShadingTree& tree)
 {
-    IG_UNUSED(name);
     tree.beginClosure();
 
     auto ea      = extractEA(light);
@@ -204,11 +203,14 @@ static void light_sky(std::ostream& stream, const std::string& name, const std::
     const auto cdf         = setup_cdf(path);
     const std::string id   = ShaderUtils::escapeIdentifier(name);
 
+    const Matrix3f trans = light->property("transform").getTransform().linear().transpose().inverse();
+
     stream << tree.pullHeader()
            << "  let tex_" << id << "   = make_image_texture(make_repeat_border(), make_bilinear_filter(), device.load_image(\"" << path << "\"), false, false);" << std::endl
            << "  let cdf_" << id << "   = cdf::make_cdf_2d(device.load_buffer(\"" << std::get<0>(cdf) << "\"), " << std::get<1>(cdf) << ", " << std::get<2>(cdf) << ");" << std::endl
            << "  let light_" << id << " = make_environment_light_textured(" << tree.context().Environment.SceneDiameter / 2
-           << ", tex_" << id << ", cdf_" << id << ", 0, 0);" << std::endl;
+           << ", tex_" << id << ", cdf_" << id
+           << ", " << ShaderUtils::inlineMatrix(trans) << ");" << std::endl;
 
     tree.endClosure();
 }
@@ -221,13 +223,18 @@ static void light_cie_env(std::ostream& stream, const std::string& name, const s
     tree.addColor("ground", *light, Vector3f::Ones(), true, ShadingTree::IM_Light);
     tree.addNumber("ground_brightness", *light, 0.2f, true, ShadingTree::IM_Light);
 
-    bool cloudy = (name == "cie_cloudy" || name == "ciecloudy");
+    const Matrix3f trans = light->property("transform").getTransform().linear().transpose().inverse();
+    const bool has_ground = light->property("has_ground").getBool(true);
+
+    bool cloudy = (light->pluginType() == "cie_cloudy" || light->pluginType() == "ciecloudy");
     stream << tree.pullHeader()
            << "  let light_" << ShaderUtils::escapeIdentifier(name) << " = make_cie_sky_light(" << tree.context().Environment.SceneDiameter / 2
            << ", " << tree.getInline("zenith")
            << ", " << tree.getInline("ground")
            << ", " << tree.getInline("ground_brightness")
-           << ", " << (cloudy ? "true" : "false") << ");" << std::endl;
+           << ", " << (cloudy ? "true" : "false")
+           << ", " << (has_ground ? "true" : "false")
+           << ", " << ShaderUtils::inlineMatrix(trans) << ");" << std::endl;
 
     tree.endClosure();
 }
@@ -244,7 +251,6 @@ static inline float perez_model(float zenithAngle, float sunAngle, float a, floa
 
 static void light_perez(std::ostream& stream, const std::string& name, const std::shared_ptr<Parser::Object>& light, ShadingTree& tree)
 {
-    IG_UNUSED(name);
     tree.beginClosure();
 
     auto ea      = extractEA(light);
@@ -255,6 +261,8 @@ static void light_perez(std::ostream& stream, const std::string& name, const std
     auto c = light->property("c").getNumber(1.0f);
     auto d = light->property("d").getNumber(1.0f);
     auto e = light->property("e").getNumber(1.0f);
+
+    const Matrix3f trans = light->property("transform").getTransform().linear().transpose().inverse();
 
     Vector3f color;
     if (light->properties().count("luminance")) {
@@ -274,21 +282,20 @@ static void light_perez(std::ostream& stream, const std::string& name, const std
            << ", " << b
            << ", " << c
            << ", " << d
-           << ", " << e << ");" << std::endl;
+           << ", " << e
+           << ", " << ShaderUtils::inlineMatrix(trans) << ");" << std::endl;
 
     tree.endClosure();
 }
 
 static void light_env(std::ostream& stream, const std::string& name, const std::shared_ptr<Parser::Object>& light, ShadingTree& tree)
 {
-    IG_UNUSED(name);
     tree.beginClosure();
 
     const std::string id = ShaderUtils::escapeIdentifier(name);
 
     if (light->property("radiance").type() == Parser::PT_STRING) {
-        float theta_off = light->property("theta").getNumber(0.0f) * Deg2Rad;
-        float phi_off   = light->property("phi").getNumber(0.0f) * Deg2Rad;
+        const Matrix3f trans = light->property("transform").getTransform().linear().transpose().inverse();
 
         const std::string tex_name = light->property("radiance").getString();
         const auto tex             = tree.context().Scene.texture(tex_name);
@@ -301,16 +308,16 @@ static void light_env(std::ostream& stream, const std::string& name, const std::
         if (tex_path.empty()) {
             stream << LoaderTexture::generate(tex_name, *tex, tree)
                    << "  let light_" << id << " = make_environment_light_textured_naive(" << tree.context().Environment.SceneDiameter / 2
-                   << ", tex_" << ShaderUtils::escapeIdentifier(tex_name) << ", "
-                   << theta_off << ", " << phi_off << ");" << std::endl;
+                   << ", tex_" << ShaderUtils::escapeIdentifier(tex_name)
+                   << ", " << ShaderUtils::inlineMatrix(trans) << ");" << std::endl;
         } else {
             const auto cdf = setup_cdf(tex_path);
             stream << LoaderTexture::generate(tex_name, *tex, tree)
                    << "  let cdf_" << id << "   = cdf::make_cdf_2d(device.load_buffer(\"" << std::get<0>(cdf) << "\"), " << std::get<1>(cdf) << ", " << std::get<2>(cdf) << ");" << std::endl
                    << "  let light_" << id << " = make_environment_light_textured(" << tree.context().Environment.SceneDiameter / 2
                    << ", tex_" << ShaderUtils::escapeIdentifier(tex_name)
-                   << ", cdf_" << id << ", "
-                   << theta_off << ", " << phi_off << ");" << std::endl;
+                   << ", cdf_" << id
+                   << ", " << ShaderUtils::inlineMatrix(trans) << ");" << std::endl;
         }
     } else {
         const Vector3f color = tree.context().extractColor(*light, "radiance");

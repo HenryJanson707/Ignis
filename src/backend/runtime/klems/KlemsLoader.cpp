@@ -71,9 +71,7 @@ public:
             os.write(reinterpret_cast<const char*>(&basis.PhiCount), sizeof(uint32_t));
         }
 
-        for (auto& val : offsets) {
-            os.write(reinterpret_cast<const char*>(&val), sizeof(uint32_t));
-        }
+        os.write(reinterpret_cast<const char*>(offsets.data()), offsets.size() * sizeof(uint32_t));
     }
 
     inline const std::vector<KlemsThetaBasis>& thetaBasis() const { return mThetaBasis; }
@@ -97,6 +95,11 @@ public:
 
     inline KlemsMatrix& matrix() { return mMatrix; }
     inline size_t size() const { return mMatrix.size(); }
+
+    inline void makeBlack()
+    {
+        mMatrix.fill(0);
+    }
 
     inline void transpose()
     {
@@ -127,22 +130,8 @@ private:
     KlemsMatrix mMatrix;
 };
 
-enum AllowedComponents {
-    AC_FrontReflection   = 0x1,
-    AC_FrontTransmission = 0x2,
-    AC_BackReflection    = 0x4,
-    AC_BackTransmission  = 0x8,
-    AC_FrontAll          = AC_FrontReflection | AC_FrontTransmission,
-    AC_BackAll           = AC_BackReflection | AC_BackTransmission,
-    AC_ReflectionAll     = AC_FrontReflection | AC_BackReflection,
-    AC_TransmissionAll   = AC_FrontTransmission | AC_BackTransmission,
-    AC_All               = AC_FrontAll | AC_BackAll
-};
-
 bool KlemsLoader::prepare(const std::filesystem::path& in_xml, const std::filesystem::path& out_data)
 {
-    const int allowedComponents = AC_All;
-
     // Read Radiance based klems BSDF xml document
     pugi::xml_document doc;
     pugi::xml_parse_result result = doc.load_file(in_xml.c_str());
@@ -281,30 +270,34 @@ bool KlemsLoader::prepare(const std::filesystem::path& in_xml, const std::filesy
 
         // Select correct component
         const std::string direction = block.child_value("WavelengthDataDirection");
-        if (direction == "Transmission Front" && (allowedComponents & AC_FrontTransmission))
+        if (direction == "Transmission Front")
             transmissionFront = component;
-        else if (direction == "Scattering Back" && (allowedComponents & AC_BackReflection))
+        else if (direction == "Scattering Back")
             reflectionBack = component;
-        else if (direction == "Transmission Back" && (allowedComponents & AC_BackTransmission))
+        else if (direction == "Transmission Back")
             transmissionBack = component;
-        else if (allowedComponents & AC_FrontReflection)
+        else
             reflectionFront = component;
     }
 
+    // If reflection components are not given, make them black
+    // See docs/notes/BSDFdirections.txt in Radiance for more information
+    if (!reflectionBack) {
+        auto basis     = allbasis.begin()->second;
+        reflectionBack = std::make_shared<KlemsComponent>(basis, basis);
+        reflectionBack->makeBlack();
+    }
+    if (!reflectionFront) {
+        auto basis     = allbasis.begin()->second;
+        reflectionFront = std::make_shared<KlemsComponent>(basis, basis);
+        reflectionFront->makeBlack();
+    }
+
     // Make sure both transmission parts are equal if not specified otherwise
-    if (!reflectionBack)
-        reflectionBack = reflectionFront;
-    if (!reflectionFront)
-        reflectionFront = reflectionBack;
     if (!transmissionBack)
         transmissionBack = transmissionFront;
     if (!transmissionFront)
         transmissionFront = transmissionBack;
-
-    if (!reflectionFront && !reflectionBack && !transmissionFront && !transmissionBack) {
-        IG_LOG(L_ERROR) << "Could not parse " << in_xml << ": No valid data found" << std::endl;
-        return false;
-    }
 
     if (!transmissionFront && !transmissionBack) {
         IG_LOG(L_ERROR) << "While parsing " << in_xml << ": No transmission data found" << std::endl;

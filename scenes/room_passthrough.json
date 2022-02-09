@@ -1,0 +1,8 @@
+{
+	"externals": [
+		{"filename": "room_data.json"}
+	],
+	"bsdfs": [
+		{"type":"passthrough", "name": "window"}
+	]
+}
