@@ -42,7 +42,7 @@ fn unrap_ptraypayload(payload: RayPayload) = PTRayPayload {
     eta     = payload.components(5),
 };
 
-fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, aovs: AOVTable) -> PathTracer {
+fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, aovs: AOVTable, buf: DeviceBuffer, max_path_len_light: i32) -> PathTracer {
     let offset : f32  = 0.001;
     let pdf_lightpick = if num_lights == 0 { 1 } else { 1 / (num_lights as f32) };
 
@@ -51,6 +51,25 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
     let aov_nee    = @aovs(AOV_PATH_NEE);
     //let aov_stats  = @aovs(AOV_PATH_STATS);
 
+    fn @on_bi(ray: Ray
+                 , pixel: i32
+                 , _hit: Hit
+                 , rnd: &mut RndState
+                 , payload: RayPayload
+                 , surf: SurfaceElement
+                 , mat: Material
+                 ) -> Option[(Ray, Color)]{
+        let buf_pos  = 12 * pixel * max_path_len_light;
+        // if(pixel == 500500){
+        //     print_i32(buf.load_i32(buf_pos));
+        //     //print_i32(buf_pos);
+        //     //print_i32(pixel);
+        //     print_string("\n");
+        //     print_flush();
+        // }
+        return(Option[(Ray, Color)]::None)
+    }
+ 
     fn @on_shadow( ray: Ray
                  , _pixel: i32
                  , _hit: Hit
@@ -196,7 +215,7 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
     }
 
     fn @on_bounce( ray: Ray
-                 , _pixel: i32
+                 , pixel: i32
                  , _hit: Hit
                  , rnd: &mut RndState
                  , payload: RayPayload
@@ -204,9 +223,7 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
                  , mat: Material
                  ) -> Option[(Ray, RayPayload)] {
         let pt = unrap_ptraypayload(payload);
-
         // aov_stats.splat(pixel, make_color(if pt.depth == 1 { 2 } else { 1 }, 0, 0));
-
         // Bounce
         let out_dir = vec3_neg(ray.dir);
         if let Option[BsdfSample]::Some(mat_sample) = mat.bsdf.sample(rnd, out_dir, false) {
@@ -241,6 +258,7 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
     }
 
     PathTracer {
+        on_bi          = on_bi,
         on_hit         = on_hit,
         on_miss        = on_miss,
         on_shadow      = on_shadow,

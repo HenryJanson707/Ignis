@@ -343,6 +343,7 @@ fn @cpu_hit_shade(entity_id: i32, primary: &PrimaryStream, secondary: &Secondary
         let on_hit    = path_tracer.on_hit;
         let on_shadow = path_tracer.on_shadow;
         let on_bounce = path_tracer.on_bounce;
+        let on_bi     = path_tracer.on_bi;   
         let entity    = entities(entity_id2);
         let shape     = shapes(entity.shape_id);
         for i, r_vector_width in vectorized_range(vector_width, begin2, end2) {
@@ -372,7 +373,8 @@ fn @cpu_hit_shade(entity_id: i32, primary: &PrimaryStream, secondary: &Secondary
                     )
                 );
             }
-
+            
+            @on_bi(ray, pixel, hit, &mut rnd, payload, glb_surf, mat); //TODO fix the context
             // Compute shadow rays
             if let Option[(Ray, Color)]::Some(new_ray, color) = @on_shadow(ray, pixel, hit, &mut rnd, payload, glb_surf, mat) {
                 write_secondary_ray(i, 0, new_ray);

@@ -69,7 +69,7 @@ static TechniqueInfo path_get_info(const std::string&, const std::shared_ptr<Par
     }
 
     auto variant_selector = [](uint32 i){
-        return i % 2; //TODO this is only true if we begin with zero
+        return (i + 1) % 2; //TODO this is only true if we begin with zero
     };
 
     info.VariantSelector = variant_selector;
