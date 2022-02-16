@@ -38,7 +38,7 @@ static void bi_body_loader(std::ostream& stream, const std::string&, const std::
     stream << "  let (film_width, film_height) = device.get_film_size();" << std::endl;
     stream << "  let max_depth_light = 5;" << std::endl;
     stream << "  let buf_size = film_width * film_height * 4 * max_depth_light * 12;" << std::endl;
-    stream << "  let buf = device.request_buffer(\"bi\", buf_size);" << std::endl;
+    stream << "  let buf = device.request_buffer(\"bi\", buf_size, 0);" << std::endl;
     stream << "  let technique = make_bi_renderer(buf, max_depth_light);" << std::endl;
 }
 
@@ -93,7 +93,7 @@ static TechniqueInfo path_get_info(const std::string&, const std::shared_ptr<Par
         //The Buffer Size is far too big!!
         stream << "  let max_depth_light = 5;" << std::endl;
         stream << "  let buf_size = film_width * film_height * 4 * max_depth_light * 12;" << std::endl; //TODO Find a better to set a max depth
-        stream << "  let buf = device.request_buffer(\"bi\", buf_size);" << std::endl;
+        stream << "  let buf = device.request_buffer(\"bi\", buf_size, 0);" << std::endl;
         stream << "  let camera = make_light_camera(" << std::endl;
         stream << "     settings.tmin," << std::endl;
         stream << "     settings.tmax," << std::endl;
@@ -124,7 +124,7 @@ static void path_body_loader(std::ostream& stream, const std::string&, const std
     stream << "  let (film_width, film_height) = device.get_film_size();" << std::endl;
     stream << "  let max_depth_light = 5;" << std::endl;
     stream << "  let buf_size = film_width * film_height * 4 * max_depth_light * 12;" << std::endl;
-    stream << "  let buf = device.request_buffer(\"bi\", buf_size);" << std::endl;
+    stream << "  let buf = device.request_buffer(\"bi\", buf_size, 0);" << std::endl;
 
     const int max_depth     = technique ? technique->property("max_depth").getInteger(64) : 64;
     const bool hasNormalAOV = technique ? technique->property("aov_normals").getBool(false) : false;

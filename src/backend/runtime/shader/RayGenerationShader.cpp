@@ -44,7 +44,7 @@ std::string RayGenerationShader::setup(LoaderContext& ctx)
         //The Buffer Size is far too big!!
         stream << "  let max_depth_light = 5;" << std::endl;
         stream << "  let buf_size = film_width * film_height * 4 * max_depth_light * 12;" << std::endl; //TODO Find a better to set a max depth
-        stream << "  let buf = device.request_buffer(\"bi\", buf_size);" << std::endl;
+        stream << "  let buf = device.request_buffer(\"bi\", buf_size, 0);" << std::endl;
         stream << "  let camera = make_light_camera(" << std::endl;
         stream << "     settings.tmin," << std::endl;
         stream << "     settings.tmax," << std::endl;
