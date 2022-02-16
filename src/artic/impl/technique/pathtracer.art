@@ -50,25 +50,6 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
     let aov_di     = @aovs(AOV_PATH_DIRECT);
     let aov_nee    = @aovs(AOV_PATH_NEE);
     //let aov_stats  = @aovs(AOV_PATH_STATS);
-
-    fn @on_bi(ray: Ray
-                 , pixel: i32
-                 , _hit: Hit
-                 , rnd: &mut RndState
-                 , payload: RayPayload
-                 , surf: SurfaceElement
-                 , mat: Material
-                 ) -> Option[(Ray, Color)]{
-        let buf_pos  = 12 * pixel * max_path_len_light;
-        // if(pixel == 500500){
-        //     print_i32(buf.load_i32(buf_pos));
-        //     //print_i32(buf_pos);
-        //     //print_i32(pixel);
-        //     print_string("\n");
-        //     print_flush();
-        // }
-        return(Option[(Ray, Color)]::None)
-    }
  
     fn @on_shadow( ray: Ray
                  , _pixel: i32
@@ -259,7 +240,6 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
     }
 
     Technique {
-        on_bi          = on_bi,
         on_hit         = on_hit,
         on_miss        = on_miss,
         on_shadow      = on_shadow,
