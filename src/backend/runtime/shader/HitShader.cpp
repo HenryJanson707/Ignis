@@ -32,7 +32,7 @@ std::string HitShader::setup(int entity_id, LoaderContext& ctx)
     }
 
     stream << "  let acc  = SceneAccessor {" << std::endl
-           << "    info     = " << ShaderUtils::generateSceneInfoInline(ctx) << "," << std::endl
+           << "    info     = " << ShaderUtils::inlineSceneInfo(ctx) << "," << std::endl
            << "    shapes   = shapes," << std::endl
            << "    entities = entities," << std::endl
            << "  };" << std::endl
@@ -66,7 +66,8 @@ std::string HitShader::setup(int entity_id, LoaderContext& ctx)
     stream << LoaderTechnique::generate(ctx) << std::endl
            << std::endl;
 
-    stream << "  device.handle_hit_shader(entity_id, shader, scene, technique, first, last, spp);" << std::endl
+    stream << "  let use_framebuffer = " << (!ctx.CurrentTechniqueVariantInfo().LockFramebuffer ? "true" : "false") << ";" << std::endl
+           << "  device.handle_hit_shader(entity_id, shader, scene, technique, first, last, spp, use_framebuffer);" << std::endl
            << "}" << std::endl;
 
     return stream.str();

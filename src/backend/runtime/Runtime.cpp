@@ -105,6 +105,8 @@ Runtime::Runtime(const std::filesystem::path& path, const RuntimeOptions& opts)
     , mOptions(opts)
     , mDevice(opts.Device)
     , mCurrentIteration(0)
+    , mCurrentIterationFramebuffer(0)
+    , mCurrentTechniqueVariant(0)
     , mIsTrace(false)
     , mIsDebug(false)
     , mDebugMode(DebugMode::Normal)
@@ -200,6 +202,11 @@ Runtime::Runtime(const std::filesystem::path& path, const RuntimeOptions& opts)
                 dumpShader("v" + std::to_string(i) + "_advancedShadowHit.art", variant.AdvancedShadowHitShader);
                 dumpShader("v" + std::to_string(i) + "_advancedShadowMiss.art", variant.AdvancedShadowMissShader);
             }
+
+            for (size_t i = 0; i < variant.CallbackShaders.size(); ++i) {
+                if (!variant.CallbackShaders[i].empty())
+                    dumpShader("v" + std::to_string(i) + "_callback" + std::to_string(i) + ".art", variant.CallbackShaders[i]);
+            }
         }
     }
 
@@ -247,6 +254,8 @@ void Runtime::step(const Camera& camera)
     settings.debug_mode = (uint32)mDebugMode;
 
     mLoadedInterface.RenderFunction(&settings, mCurrentIteration++);
+    if (!mTechniqueVariants[mCurrentTechniqueVariant].LockFramebuffer)
+        ++mCurrentIterationFramebuffer;
 }
 
 void Runtime::trace(const std::vector<Ray>& rays, std::vector<float>& data)
@@ -271,6 +280,9 @@ void Runtime::trace(const std::vector<Ray>& rays, std::vector<float>& data)
 
     mLoadedInterface.RenderFunction(&settings, mCurrentIteration++);
 
+    if (!mTechniqueVariants[mCurrentTechniqueVariant].LockFramebuffer)
+        ++mCurrentIterationFramebuffer;
+
     // Get result
     const float* data_ptr = getFramebuffer(0);
     data.resize(rays.size() * 3);
@@ -287,6 +299,12 @@ void Runtime::clearFramebuffer(int aov)
     return mLoadedInterface.ClearFramebufferFunction(aov);
 }
 
+void Runtime::reset() {
+    clearFramebuffer();
+    mCurrentIteration = 0;
+    mCurrentIterationFramebuffer = 0;
+}
+
 const Statistics* Runtime::getStatistics() const
 {
     return mAcquireStats ? mLoadedInterface.GetStatisticsFunction() : nullptr;
@@ -300,6 +318,8 @@ void Runtime::setup()
     settings.framebuffer_height = std::max(1u, mLoadedRenderSettings.FilmHeight);
     settings.acquire_stats      = mAcquireStats;
     settings.aov_count          = mAOVs.size();
+
+    settings.logger = &IG_LOGGER;
 
     IG_LOG(L_DEBUG) << "Init JIT compiling" << std::endl;
     ig_init_jit(mManager.getPath(mTarget).generic_u8string());
@@ -323,6 +343,10 @@ void Runtime::compileShaders()
         const auto& variant = mTechniqueVariants[i];
         auto& shaders       = mTechniqueVariantShaderSets[i];
 
+        shaders.Width           = variant.Width;
+        shaders.Height          = variant.Height;
+        shaders.LockFramebuffer = variant.LockFramebuffer;
+
         IG_LOG(L_DEBUG) << "Handling technique variant " << i << std::endl;
         IG_LOG(L_DEBUG) << "Compiling ray generation shader" << std::endl;
         const std::filesystem::path rgp = "v" + std::to_string(i) + "_rayGenerationFull.art";
@@ -336,7 +360,7 @@ void Runtime::compileShaders()
 
         IG_LOG(L_DEBUG) << "Compiling hit shaders" << std::endl;
         for (size_t j = 0; j < variant.HitShaders.size(); ++j) {
-            IG_LOG(L_DEBUG) << "Hit shader [" << i << "]" << std::endl;
+            IG_LOG(L_DEBUG) << "Hit shader [" << j << "]" << std::endl;
             const std::filesystem::path hp = "v" + std::to_string(i) + "_hitShaderFull" + std::to_string(j) + ".art";
             shaders.HitShaders.push_back(ig_compile_source(variant.HitShaders[j], "ig_hit_shader", mOptions.DumpShaderFull ? &hp : nullptr));
         }
@@ -350,6 +374,17 @@ void Runtime::compileShaders()
             const std::filesystem::path asm_ = "v" + std::to_string(i) + "_advancedShadowMissFull.art";
             shaders.AdvancedShadowMissShader = ig_compile_source(variant.AdvancedShadowMissShader, "ig_advanced_shadow_shader",
                                                                  mOptions.DumpShaderFull ? &asm_ : nullptr);
+        }
+
+        for (size_t i = 0; i < variant.CallbackShaders.size(); ++i) {
+            if (variant.CallbackShaders[i].empty()) {
+                shaders.CallbackShaders[i] = nullptr;
+            } else {
+                IG_LOG(L_DEBUG) << "Compiling callback shader [" << i << "]" << std::endl;
+                const std::filesystem::path asm_ = " v" + std::to_string(i) + "_callbackFull" + std::to_string(i) + ".art";
+                shaders.CallbackShaders[i]       = ig_compile_source(variant.CallbackShaders[i], "ig_callback_shader",
+                                                               mOptions.DumpShaderFull ? &asm_ : nullptr);
+            }
         }
     }
 }

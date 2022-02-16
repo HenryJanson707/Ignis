@@ -1,7 +1,9 @@
 set(ARTIC_MAIN_SRC
+    ${CMAKE_CURRENT_SOURCE_DIR}/core/bbox.art
     ${CMAKE_CURRENT_SOURCE_DIR}/core/color.art
     ${CMAKE_CURRENT_SOURCE_DIR}/core/common.art
     ${CMAKE_CURRENT_SOURCE_DIR}/core/cpu_common.art
+    ${CMAKE_CURRENT_SOURCE_DIR}/core/gpu_common.art
     ${CMAKE_CURRENT_SOURCE_DIR}/core/matrix.art
     ${CMAKE_CURRENT_SOURCE_DIR}/core/print.art
     ${CMAKE_CURRENT_SOURCE_DIR}/core/random.art
@@ -22,15 +24,18 @@ set(ARTIC_MAIN_SRC
     ${CMAKE_CURRENT_SOURCE_DIR}/render/mapping_gpu.art
     ${CMAKE_CURRENT_SOURCE_DIR}/render/material.art
     ${CMAKE_CURRENT_SOURCE_DIR}/render/pipeline.art
-    ${CMAKE_CURRENT_SOURCE_DIR}/render/renderer.art
     ${CMAKE_CURRENT_SOURCE_DIR}/render/scene.art
     ${CMAKE_CURRENT_SOURCE_DIR}/render/settings.art
     ${CMAKE_CURRENT_SOURCE_DIR}/render/shape.art
     ${CMAKE_CURRENT_SOURCE_DIR}/render/streams.art
+    ${CMAKE_CURRENT_SOURCE_DIR}/render/surface_element.art
+    ${CMAKE_CURRENT_SOURCE_DIR}/render/technique.art
     ${CMAKE_CURRENT_SOURCE_DIR}/render/texture.art
+    ${CMAKE_CURRENT_SOURCE_DIR}/traversal/bvh.art
     ${CMAKE_CURRENT_SOURCE_DIR}/traversal/intersection.art
     ${CMAKE_CURRENT_SOURCE_DIR}/traversal/mapping_cpu.art
     ${CMAKE_CURRENT_SOURCE_DIR}/traversal/mapping_gpu.art
+    ${CMAKE_CURRENT_SOURCE_DIR}/traversal/ray.art
     ${CMAKE_CURRENT_SOURCE_DIR}/traversal/stack.art
 )
 
@@ -57,6 +62,7 @@ set(ARTIC_EXTRA_SRC
     ${CMAKE_CURRENT_SOURCE_DIR}/impl/technique/debugtracer.art
     ${CMAKE_CURRENT_SOURCE_DIR}/impl/technique/pathtracer.art
     ${CMAKE_CURRENT_SOURCE_DIR}/impl/technique/bitracer.art
+    ${CMAKE_CURRENT_SOURCE_DIR}/impl/technique/photonmapper.art
     ${CMAKE_CURRENT_SOURCE_DIR}/impl/camera.art
     ${CMAKE_CURRENT_SOURCE_DIR}/impl/cdf.art
     ${CMAKE_CURRENT_SOURCE_DIR}/impl/emitter.art

@@ -38,6 +38,38 @@ static inline size_t roundUp(size_t num, size_t multiple)
     return num + multiple - remainder;
 }
 
+enum class BufferRequestFlags {
+    Clear       = 0x1, // Will clear the buffer (setting it bytewise to 0) on each call to requestBuffer
+    ClearOnInit = 0x2  // Will clear the buffer (setting it bytewise to 0) only the first time this specific buffer was requested
+};
+
+template <typename T>
+void clearArray(anydsl::Array<T>& array)
+{
+    if (array.size() == 0)
+        return;
+
+    if (array.device() == 0) { // CPU
+        std::memset(array.data(), 0, array.size() * sizeof(T));
+    } else {
+        // FIXME: This is bad behaviour. We need a memset function in the anydsl_runtime
+        // or add more utility functions to artic
+        thread_local std::vector<uint8_t> clear_buffer;
+
+        size_t dst_size = array.size() * sizeof(T);
+        if (clear_buffer.size() < dst_size) {
+            size_t off = clear_buffer.size();
+            size_t len = dst_size - clear_buffer.size();
+            clear_buffer.resize(dst_size);
+            std::memset(clear_buffer.data() + off, 0, len);
+        }
+
+        anydsl_copy(0 /*Host*/, (void*)clear_buffer.data(), 0,
+                    array.device(), (void*)array.data(), 0,
+                    dst_size);
+    }
+}
+
 // TODO: It would be great to get the number below automatically
 constexpr size_t MaxRayPayloadComponents = 8;
 constexpr size_t RayStreamSize           = 9;
@@ -137,6 +169,9 @@ struct Interface {
         , film_height(setup.framebuffer_height)
         , setup(setup)
     {
+        // Due to the DLL interface, we do have multiple instances of the logger. Make sure they are the same
+        IG_LOGGER = *setup.logger;
+
         for (auto& arr : aovs)
             arr = std::move(anydsl::Array<float>(film_width * film_height * 3));
     }
@@ -424,7 +459,7 @@ struct Interface {
                    std::move(copyToDevice(dev, vec)), vec.size()));
     }
 
-    inline const DeviceBuffer& requestBuffer(int32_t dev, const std::string& name, int32_t size)
+    inline DeviceBuffer& requestBuffer(int32_t dev, const std::string& name, int32_t size, int32_t flags)
     {
         std::lock_guard<std::mutex> _guard(thread_mutex);
 
@@ -435,13 +470,21 @@ struct Interface {
 
         auto& buffers = devices[dev].buffers;
         auto it       = buffers.find(name);
-        if (it != buffers.end() && std::get<1>(it->second) == size)
+        if (it != buffers.end() && std::get<1>(it->second) >= size) {
+            if (flags & (int)BufferRequestFlags::Clear)
+                clearArray(std::get<0>(it->second));
             return it->second;
+        }
 
         IG_LOG(IG::L_DEBUG) << "Requested buffer " << name << " with " << size << " bytes" << std::endl;
-        return buffers[name] = std::move(DeviceBuffer(
-                   std::move(anydsl::Array<uint8_t>(dev, reinterpret_cast<uint8_t*>(anydsl_alloc(dev, size)), size)),
-                   size));
+        buffers[name] = std::move(DeviceBuffer(
+            std::move(anydsl::Array<uint8_t>(dev, reinterpret_cast<uint8_t*>(anydsl_alloc(dev, size)), size)),
+            size));
+
+        if ((flags & (int)BufferRequestFlags::ClearOnInit) || (flags & (int)BufferRequestFlags::Clear))
+            clearArray(std::get<0>(buffers[name]));
+
+        return buffers[name];
     }
 
     inline int runRayGenerationShader(int* id, int size, int xmin, int ymin, int xmax, int ymax)
@@ -494,6 +537,11 @@ struct Interface {
         return shader_set.AdvancedShadowHitShader != nullptr && shader_set.AdvancedShadowMissShader != nullptr;
     }
 
+    inline bool isFramebufferLocked()
+    {
+        return shader_set.LockFramebuffer;
+    }
+
     inline void runAdvancedShadowShader(int first, int last, bool is_hit)
     {
         IG_ASSERT(useAdvancedShadowHandling(), "Expected advanced shadow shader only be called if it is enabled!");
@@ -523,6 +571,17 @@ struct Interface {
         }
     }
 
+    inline void runCallbackShader(int type)
+    {
+        IG_ASSERT(type >= 0 && type < (int)IG::CallbackType::_COUNT, "Expected callback shader type to be well formed!");
+
+        if (shader_set.CallbackShaders[type] != nullptr) {
+            using Callback = decltype(ig_callback_shader);
+            auto callback  = (Callback*)shader_set.CallbackShaders[type];
+            callback(&current_settings, current_iteration);
+        }
+    }
+
     inline float* getFilmImage(int32_t dev)
     {
         if (dev != 0) {
@@ -545,6 +604,8 @@ struct Interface {
             return getFilmImage(dev);
 
         int32_t index = id - 1;
+        IG_ASSERT(index < aovs.size(), "AOV index out of bounds!");
+
         if (dev != 0) {
             auto& device = devices[dev];
             if (device.aovs.size() != aovs.size())
@@ -564,7 +625,7 @@ struct Interface {
 
     inline void present(int32_t dev)
     {
-        for (size_t id = 0; id < aovs.size(); ++id)
+        for (size_t id = 0; id < devices[dev].aovs.size(); ++id)
             anydsl::copy(devices[dev].aovs[id], aovs[id]);
 
         anydsl::copy(devices[dev].film_pixels, host_pixels);
@@ -609,7 +670,7 @@ struct Interface {
 
 static std::unique_ptr<Interface> sInterface;
 
-static Settings convert_settings(const DriverRenderSettings* settings)
+static Settings convert_settings(const DriverRenderSettings* settings, IG::uint32 iter)
 {
     Settings renderSettings;
     renderSettings.device  = settings->device;
@@ -630,6 +691,7 @@ static Settings convert_settings(const DriverRenderSettings* settings)
     renderSettings.right.z = settings->right[2];
     renderSettings.tmin    = settings->tmin;
     renderSettings.tmax    = settings->tmax;
+    renderSettings.iter    = (int)iter;
 
     renderSettings.debug_mode = settings->debug_mode;
 
@@ -638,7 +700,7 @@ static Settings convert_settings(const DriverRenderSettings* settings)
 
 void glue_render(const DriverRenderSettings* settings, IG::uint32 iter)
 {
-    Settings renderSettings = convert_settings(settings);
+    Settings renderSettings = convert_settings(settings, iter);
 
     sInterface->ray_list          = settings->rays;
     sInterface->current_iteration = iter;
@@ -773,6 +835,17 @@ void ignis_get_aov_image(int dev, int id, float** aov_pixels)
     *aov_pixels = sInterface->getAOVImage(dev, id);
 }
 
+void ignis_get_work_info(int* width, int* height)
+{
+    if (sInterface->shader_set.Width > 0 && sInterface->shader_set.Height > 0) {
+        *width  = sInterface->shader_set.Width;
+        *height = sInterface->shader_set.Height;
+    } else {
+        *width  = sInterface->film_width;
+        *height = sInterface->film_height;
+    }
+}
+
 void ignis_load_bvh2_ent(int dev, Node2** nodes, EntityLeaf1** objs)
 {
     auto& bvh = sInterface->loadEntityBVH<Bvh2Ent, Node2>(dev);
@@ -837,9 +910,9 @@ void ignis_load_buffer(int32_t dev, const char* file, uint8_t** data, int32_t* s
     *size     = std::get<1>(img);
 }
 
-void ignis_request_buffer(int32_t dev, const char* name, uint8_t** data, int size)
+void ignis_request_buffer(int32_t dev, const char* name, uint8_t** data, int size, int flags)
 {
-    auto& buffer = sInterface->requestBuffer(dev, name, size);
+    auto& buffer = sInterface->requestBuffer(dev, name, size, flags);
     *data        = const_cast<uint8_t*>(std::get<0>(buffer).data());
 }
 
@@ -957,9 +1030,19 @@ void ignis_handle_advanced_shadow_shader(int first, int last, bool is_hit)
     sInterface->runAdvancedShadowShader(first, last, is_hit);
 }
 
+void ignis_handle_callback_shader(int type)
+{
+    sInterface->runCallbackShader(type);
+}
+
 bool ignis_use_advanced_shadow_handling()
 {
     return sInterface->useAdvancedShadowHandling();
+}
+
+bool ignis_is_framebuffer_locked()
+{
+    return sInterface->isFramebufferLocked();
 }
 
 void ignis_present(int dev)

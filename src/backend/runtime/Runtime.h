@@ -49,6 +49,7 @@ public:
     void setup();
     void step(const Camera& camera);
     void trace(const std::vector<Ray>& rays, std::vector<float>& data);
+    void reset();
 
     const float* getFramebuffer(int aov = 0) const;
     // aov<0 will clear all aovs
@@ -57,6 +58,7 @@ public:
 
     inline uint32 currentTechniqueVariant() const { return mCurrentTechniqueVariant; }
     inline uint32 currentIterationCount() const { return mCurrentIteration; }
+    inline uint32 currentIterationCountForFramebuffer() const { return mCurrentIterationFramebuffer; }
 
     const Statistics* getStatistics() const;
 
@@ -91,6 +93,7 @@ private:
     Target mTarget;
 
     uint32 mCurrentIteration;
+    uint32 mCurrentIterationFramebuffer;
     uint32 mCurrentTechniqueVariant;
 
     bool mIsTrace;
