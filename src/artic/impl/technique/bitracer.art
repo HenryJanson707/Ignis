@@ -1,4 +1,4 @@
-fn @make_bi_renderer(buf: DeviceBuffer, max_path_len_light: i32) -> Technique  {
+fn @make_light_renderer(buf: DeviceBuffer, max_path_len_light: i32) -> Technique  {
     let offset:f32 = 0.001;
 
     fn @on_bounce( ray: Ray
@@ -65,3 +65,5 @@ fn @make_bi_renderer(buf: DeviceBuffer, max_path_len_light: i32) -> Technique  {
         on_shadow_miss = @ |_, _, _| Option[(Color)]::None,
     }
 }
+
+

@@ -39,7 +39,7 @@ static void bi_body_loader(std::ostream& stream, const std::string&, const std::
     stream << "  let max_depth_light = 5;" << std::endl;
     stream << "  let buf_size = film_width * film_height * 4 * max_depth_light * 12;" << std::endl;
     stream << "  let buf = device.request_buffer(\"bi\", buf_size, 0);" << std::endl;
-    stream << "  let technique = make_bi_renderer(buf, max_depth_light);" << std::endl;
+    stream << "  let technique = make_light_renderer(buf, max_depth_light);" << std::endl;
 }
 
 static void debug_body_loader(std::ostream& stream, const std::string&, const std::shared_ptr<Parser::Object>&, const LoaderContext&)
@@ -166,7 +166,7 @@ static void path_body_loader(std::ostream& stream, const std::string&, const std
 
         stream << "  let technique = make_path_renderer(" << max_depth << ", num_lights, lights, aovs, buf, max_depth_light);" << std::endl;
     }else{
-        stream << "  let technique = make_bi_renderer(buf, max_depth_light);" << std::endl;
+        stream << "  let technique = make_light_renderer(buf, max_depth_light);" << std::endl;
     }
 }
 
