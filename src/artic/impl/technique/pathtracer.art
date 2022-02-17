@@ -52,7 +52,7 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
     //let aov_stats  = @aovs(AOV_PATH_STATS);
  
     fn @on_shadow( ray: Ray
-                 , _pixel: i32
+                 , pixel: i32
                  , _hit: Hit
                  , rnd: &mut RndState
                  , payload: RayPayload
@@ -67,7 +67,15 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
         if unrap_ptraypayload(payload).depth + 1 > max_path_len {
             return(Option[(Ray, Color)]::None)
         }
+        
+        let buf_pos  = 12 * pixel * max_path_len_light;
+        let current_light_max_depth = buf.load_i32(buf_pos);
+        let current_light_depth = pick_light(rnd, current_light_max_depth);
+        let buf_pos_added = buf_pos + current_light_depth * 12;
 
+        if(pixel < 20000){
+            print_i32(current_light_depth);
+        }
         // Note: randi() returns random integers, but we only want positive integers here
         let light_id      = pick_light(rnd, num_lights);
         let light         = @lights(light_id);

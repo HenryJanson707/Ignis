@@ -15,8 +15,8 @@ fn @make_light_camera(tmin: f32, tmax: f32, buf: DeviceBuffer, num_lights: i32, 
             let intensity       = color_to_vec3(light_sample.intensity);
             
             let current_pos     = pixel * 12 * max_path_len;
+            
             //The current size of one data point is 12 bytes (valid: i32 (0, 1), material: i32, pdf: f32, pos: vec3, dir: vec3, intensity: vec3)
-
             buf.store_int2(current_pos, 1, -1); //Has the light a material???
             buf.store_f32(current_pos + 2, pdf);
             buf.store_vec3(current_pos + 3, pos);

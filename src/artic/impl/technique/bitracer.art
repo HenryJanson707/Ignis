@@ -1,4 +1,4 @@
-fn @make_bi_renderer(buf: DeviceBuffer, max_path_len: i32) -> Technique  {
+fn @make_bi_renderer(buf: DeviceBuffer, max_path_len_light: i32) -> Technique  {
     let offset:f32 = 0.001;
 
     fn @on_bounce( ray: Ray
@@ -20,25 +20,27 @@ fn @make_bi_renderer(buf: DeviceBuffer, max_path_len: i32) -> Technique  {
 
         // Bounce
         let out_dir  = vec3_neg(ray.dir);
-        let buf_pos  = 12 * pixel * max_path_len;
+        let buf_pos  = 12 * pixel * max_path_len_light;
 
         if let Option[BsdfSample]::Some(mat_sample) = mat.bsdf.sample(rnd, out_dir, false) {
             let contrib = color_mul(pt.contrib, mat_sample.color/* Pdf and cosine are already applied!*/);
 
             let rr_prob = if mat.bsdf.is_specular { 1 } else { russian_roulette_pbrt(color_mulf(pt.contrib, pt.eta * pt.eta), 0.95) };
-            if pt.depth >= max_path_len || randf(rnd) >= rr_prob {
-                buf.store_i32(buf_pos, 0);
+            if pt.depth >= max_path_len_light || randf(rnd) >= rr_prob {
                 return(Option[(Ray, RayPayload)]::None)
             }
             
             let mis = if mat.bsdf.is_specular { 0 } else { 1 / mat_sample.pdf };
             let new_contrib = color_mulf(contrib, 1 / rr_prob);
 
-            buf.store_int2(buf_pos, 1, -1); // We currently have no material index
-            buf.store_f32(buf_pos + 2, 0.0); //TODO where is the PDF?
-            buf.store_vec3(buf_pos + 3, surf.point);
-            buf.store_vec3(buf_pos + 6, mat_sample.in_dir);
-            buf.store_vec3(buf_pos + 9, color_to_vec3(new_contrib));
+            let added_buf_pos = buf_pos + pt.depth * 12;
+            buf.store_i32(buf_pos, pt.depth + 1); //this means the first pixel position indicates the depth
+
+            buf.store_int2(added_buf_pos, 1, -1); // We currently have no material index
+            buf.store_f32(added_buf_pos + 2, 0.0); //TODO where is the PDF?
+            buf.store_vec3(added_buf_pos + 3, surf.point);
+            buf.store_vec3(added_buf_pos + 6, mat_sample.in_dir);
+            buf.store_vec3(added_buf_pos + 9, color_to_vec3(new_contrib));
 
             make_option(
                 make_ray(surf.point, mat_sample.in_dir, offset, flt_max),
@@ -50,7 +52,6 @@ fn @make_bi_renderer(buf: DeviceBuffer, max_path_len: i32) -> Technique  {
                 })
             )
         } else {
-            buf.store_i32(buf_pos, 0);
             Option[(Ray, RayPayload)]::None
         }
     }
