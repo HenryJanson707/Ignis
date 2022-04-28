@@ -21,8 +21,8 @@ fn @make_light_renderer(buf: DeviceBuffer, max_path_len_light: i32) -> Technique
         // Bounce
         let out_dir  = vec3_neg(ray.dir);
         let buf_pos  = 12 * pixel * max_path_len_light;
-
-        if let Option[BsdfSample]::Some(mat_sample) = mat.bsdf.sample(rnd, out_dir, false) {
+        //TODO geht das ueberhaupt so??? wir haben ja die in_dir nicht die out dir???
+        if let Option[BsdfSample]::Some(mat_sample) = mat.bsdf.sample(rnd, out_dir, false) {//TODO mostliky this is not right!!! Look at the Direktion
             let contrib = color_mul(pt.contrib, mat_sample.color/* Pdf and cosine are already applied!*/);
 
             let rr_prob = if mat.bsdf.is_specular { 1 } else { russian_roulette_pbrt(color_mulf(pt.contrib, pt.eta * pt.eta), 0.95) };
@@ -30,6 +30,7 @@ fn @make_light_renderer(buf: DeviceBuffer, max_path_len_light: i32) -> Technique
                 return(Option[(Ray, RayPayload)]::None)
             }
             
+            //TODO this is wrong the mis function
             let mis = if mat.bsdf.is_specular { 0 } else { 1 / mat_sample.pdf };
             let new_contrib = color_mulf(contrib, 1 / rr_prob);
 
