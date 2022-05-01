@@ -1,3 +1,14 @@
+fn @convertDensity(current_pos: vec3, next_pos: vec3, next_normal: vec3, pdf: f32) -> f32{
+    let w       = vec3_sub(next_pos, current_pos);
+    let dist2   = vec3_dot(w, w);
+    let dist    = math_builtins::sqrt(dist2);
+    let dir     = vec3_mulf(w , 1 / dist);
+
+    let out_pdf = pdf * absolute_cos(next_normal, dir) / dist2;
+    out_pdf
+}
+
+
 fn @make_light_renderer(buf: DeviceBuffer, max_path_len_light: i32) -> Technique  {
     let offset:f32 = 0.001;
 
@@ -10,44 +21,71 @@ fn @make_light_renderer(buf: DeviceBuffer, max_path_len_light: i32) -> Technique
                  , mat: Material
                  ) -> Option[(Ray, RayPayload)] {
         let pt = unrap_ptraypayload(payload);
-        // Russian roulette and maximum depth
-        // let rr_prob = if mat.bsdf.is_specular { 1 } else { russian_roulette(state.contrib, 0.75) };
-        // if state.depth >= max_path_len || randf(rnd) >= rr_prob {
-        //     return(Option[Ray]::None)
-        // }
+        
+        //TODO is that at the right position or should it be further down?
+        if state.depth >= max_path_len {
+            return(Option[Ray]::None)
+        }
 
         //aov_stats.splat(pixel, make_color(if pt.depth == 1 { 2 } else { 1 }, 0, 0));
 
         // Bounce
-        let out_dir  = vec3_neg(ray.dir);
-        let buf_pos  = 12 * pixel * max_path_len_light;
+        let wo       = vec3_neg(ray.dir);
+        let buf_pos  = 16 * pixel * max_path_len_light;
         //TODO geht das ueberhaupt so??? wir haben ja die in_dir nicht die out dir???
-        if let Option[BsdfSample]::Some(mat_sample) = mat.bsdf.sample(rnd, out_dir, false) {//TODO mostliky this is not right!!! Look at the Direktion
-            let contrib = color_mul(pt.contrib, mat_sample.color/* Pdf and cosine are already applied!*/);
+        if let Option[BsdfSample]::Some(mat_sample) = mat.bsdf.sample(rnd, wo, true) {//TODO mostliky this is not right!!! Look at the Direktion
+            let beta   = pt.contrib;
+            let pdfFwd = pt.mis;
 
-            let rr_prob = if mat.bsdf.is_specular { 1 } else { russian_roulette_pbrt(color_mulf(pt.contrib, pt.eta * pt.eta), 0.95) };
-            if pt.depth >= max_path_len_light || randf(rnd) >= rr_prob {
-                return(Option[(Ray, RayPayload)]::None)
-            }
+            //let contrib = color_mul(pt.contrib, mat_sample.color/* Pdf and cosine are already applied!*/);
+
+            // let rr_prob = if mat.bsdf.is_specular { 1 } else { russian_roulette_pbrt(color_mulf(pt.contrib, pt.eta * pt.eta), 0.95) };
+            // if pt.depth >= max_path_len_light || randf(rnd) >= rr_prob {
+            //     return(Option[(Ray, RayPayload)]::None)
+            // }
             
             //TODO this is wrong the mis function
-            let mis = if mat.bsdf.is_specular { 0 } else { 1 / mat_sample.pdf };
-            let new_contrib = color_mulf(contrib, 1 / rr_prob);
+            // let mis = if mat.bsdf.is_specular { 0 } else { 1 / mat_sample.pdf };
+            // let new_contrib = color_mulf(contrib, 1 / rr_prob);
 
-            let added_buf_pos = buf_pos + pt.depth * 12;
+            let current_buf_pos = buf_pos + pt.depth * 16;
+            let prev_buf_pos = buf_pos + (pt.depth - 1) * 16;
+
+            if pt.depth == 1{ //TODO we assume here that the fist hit is state.dpeth == 1 this has to be tested
+                pdfFwd     = load_f32(current_buf_pos + 2);
+                beta       = vec3_to_color(load_vec3(current_buf_pos + 10));
+            }
+
+            let current_pos     = surf.point;
+            let current_normal  = surf.face_normal;
+
+            let prev_pos        = buf.load_vec3(prev_buf_pos + 4);
+
+            let correctedFwdPDF = convertDensity(prev_pos, current_pos, current_normal, pdfFwd);
+
             buf.store_i32(buf_pos, pt.depth + 1); //this means the first pixel position indicates the depth
 
-            buf.store_int2(added_buf_pos, 1, -1); // We currently have no material index
-            buf.store_f32(added_buf_pos + 2, 0.0); //TODO where is the PDF?
-            buf.store_vec3(added_buf_pos + 3, surf.point);
-            buf.store_vec3(added_buf_pos + 6, mat_sample.in_dir);
-            buf.store_vec3(added_buf_pos + 9, color_to_vec3(new_contrib));
+            //The current size of one data point is 16 bytes (valid: i32 (0, 1): 0, material: i32: 1, pdfFwd: f32 : 2, pdfRev: f32: 3, pos: vec3 : 4, normal: vec3 : 7, beta: vec3 : 10, wo: vec3 : 13)
+            buf.store_int2(current_pos, 1, -1); //currently no material
+            buf.store_f32(current_pos + 2, correctedFwdPDF);
+            buf.store_f32(current_pos + 3, make_vec3(0,0,0));
+            buf.store_vec3(current_pos + 4, current_pos);
+            buf.store_vec3(current_pos + 7, current_normal);
+            buf.store_vec3(current_pos + 10, color_to_vec3(beta));
+            buf.store_vec3(current_pos + 13, wo);
+
+
+            let next_pdf = mat_sample.pdf;
+            if next_pdf == 0.0{ //TODO better use Epsilon?
+                return(Option[Ray]::None)
+            }
+            let next_contri = color_mulf(color_mul(beta, mat_sample.color), 1 / next_pdf); //TODO check this line
 
             make_option(
                 make_ray(surf.point, mat_sample.in_dir, offset, flt_max),
                 wrap_ptraypayload(PTRayPayload {
-                    mis = mis,
-                    contrib = new_contrib,
+                    mis = next_pdf,
+                    contrib = next_contri,
                     depth = pt.depth + 1,
                     eta  = pt.eta * mat_sample.eta
                 })

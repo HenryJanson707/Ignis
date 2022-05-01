@@ -59,7 +59,7 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
                  , surf: SurfaceElement
                  , mat: Material
                  ) -> Option[(Ray, Color)] {
-        let buf_pos  = 12 * pixel * max_path_len_light;
+        let buf_pos  = 16 * pixel * max_path_len_light;
         let current_light_max_depth = buf.load_i32(buf_pos);
         let current_light_depth = pick_light(rnd, current_light_max_depth);
         //let current_light_depth = -1;
@@ -138,11 +138,11 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
             return(Option[(Ray, Color)]::None)
         }else{
             //TODO check the loading!!!!!
-            let buf_pos_added = buf_pos + current_light_depth * 12;
-            let mis0 = buf.load_f32(buf_pos_added + 2 - 12);//we need to load the last mis because the one bevor is dependend on the next angle
+            let buf_pos_added = buf_pos + current_light_depth * 16;
+            let mis0 = buf.load_f32(buf_pos_added + 2 - 16);//we need to load the last mis because the one bevor is dependend on the next angle
             let pos1 = buf.load_vec3(buf_pos_added + 3);
-            let dir0 = buf.load_vec3(buf_pos_added + 6 - 12);//we load the last dir
-            let intensity0 = vec3_to_color(buf.load_vec3(buf_pos_added + 9 - 12));
+            let dir0 = buf.load_vec3(buf_pos_added + 6 - 16);//we load the last dir
+            let intensity0 = vec3_to_color(buf.load_vec3(buf_pos_added + 9 - 16));
             
             //TODO check this
             let conection_dir = vec3_sub(surf.point, pos1);
