@@ -13,14 +13,15 @@ fn @make_light_camera(tmin: f32, tmax: f32, buf: DeviceBuffer, num_lights: i32, 
             let pdfFwd          = light_sample.pdf_area * pdf_pick; 
             let pdfFwd2         = light_sample.pdf_dir;
             let cos_light       = light_sample.cos;
-            let pdfRev          = 0.0
-            let pdf             = cos_light / (light_sample.pdf_area * light_sample.pdf_dir * pdf_pick)
+            let pdfRev : f32    = 0.0;
+            let pdf             = cos_light / (light_sample.pdf_area * light_sample.pdf_dir * pdf_pick);
             let pos             = light_sample.pos;
             let normal          = make_vec3(0, 0, 0);
             let intensity       = color_to_vec3(light_sample.intensity);
             let beta            = vec3_mulf(intensity, pdf);
             let wo              = make_vec3(0, 0, 0); //eventhoug we call it wo in this case it would be wi?
-            
+            let dir             = light_sample.dir;
+
             let current_pos     = pixel * 16 * max_path_len;
             let next_pos        = pixel * 16 * max_path_len + 16;
             
