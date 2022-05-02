@@ -73,13 +73,25 @@ fn @make_light_renderer(buf: DeviceBuffer, max_path_len_light: i32) -> Technique
             buf.store_vec3(current_buf_pos + 7, current_normal);
             buf.store_vec3(current_buf_pos + 10, color_to_vec3(beta));
             buf.store_vec3(current_buf_pos + 13, wo);
-
+            
+            // if(pixel == 32566){
+            //     print_string("\n");
+            //     print_i32(pt.depth);
+            //     print_string("\n");
+            //     print_f32(beta.r);
+            //     print_string("\n");
+            //     print_f32(mat_sample.color.r);
+            //     print_string("\n");
+            //     print_f32(pdfFwd);
+            //     print_string("\n");
+            // }
 
             let next_pdf = mat_sample.pdf;
             if next_pdf == 0.0{ //TODO better use Epsilon?
                 return(Option[(Ray, RayPayload)]::None)
             }
-            let next_contri = color_mulf(color_mul(beta, mat_sample.color), 1 / next_pdf); //TODO check this line
+            //let next_contri = color_mulf(color_mul(beta, mat_sample.color), 1 / next_pdf); //TODO check this line
+            let next_contri = color_mul(beta, mat_sample.color); //cos and pdf is already applied
 
             make_option(
                 make_ray(surf.point, mat_sample.in_dir, offset, flt_max),
