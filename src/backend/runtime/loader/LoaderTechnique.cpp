@@ -133,6 +133,8 @@ static void path_body_loader(std::ostream& stream, const std::string&, const std
     const bool hasStatsAOV  = technique ? technique->property("aov_stats").getBool(false) : false;
     
     if(ctx.CurrentTechniqueVariant == 0){
+        stream << "  let buf_size_camera = film_width * film_height * 4 * " << max_depth << " * 16;" << std::endl;
+        stream << "  let buf_camera = device.request_buffer(\"camera\", buf_size, 0);" << std::endl;
         size_t counter = 1;
         if (hasNormalAOV)
             stream << "  let aov_normals = device.load_aov_image(" << counter++ << ", spp);" << std::endl;
@@ -165,7 +167,7 @@ static void path_body_loader(std::ostream& stream, const std::string&, const std
             << "    }" << std::endl
             << "  };" << std::endl;
 
-        stream << "  let technique = make_path_renderer(" << max_depth << ", num_lights, lights, aovs, buf, max_depth_light);" << std::endl;
+        stream << "  let technique = make_path_renderer(" << max_depth << ", num_lights, lights, aovs, buf, buf_camera, max_depth_light);" << std::endl;
     }else{
         stream << "  let technique = make_light_renderer(buf, max_depth_light);" << std::endl;
     }

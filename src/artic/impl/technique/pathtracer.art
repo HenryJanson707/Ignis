@@ -42,13 +42,17 @@ fn unrap_ptraypayload(payload: RayPayload) = PTRayPayload {
     eta     = payload.components(5),
 };
 
-fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, aovs: AOVTable, buf: DeviceBuffer, max_path_len_light: i32) -> Technique {
+fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, aovs: AOVTable, buf: DeviceBuffer, camera_buf: DeviceBuffer, max_path_len_light: i32) -> Technique {
     let offset : f32  = 0.001;
     let pdf_lightpick = if num_lights == 0 { 1 } else { 1 / (num_lights as f32) };
 
     let aov_normal = @aovs(AOV_PATH_NORMAL);
     let aov_di     = @aovs(AOV_PATH_DIRECT);
     let aov_nee    = @aovs(AOV_PATH_NEE);
+
+    // let (film_width, film_height) = device.get_film_size();
+    // let buf_size = film_width * film_height * 4 * max_path_len * 16;
+    // let camera_buf = device.request_buffer("camera_path", buf_size, 0);
     //let aov_stats  = @aovs(AOV_PATH_STATS);
  
     fn @on_shadow( ray: Ray
@@ -59,111 +63,177 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
                  , surf: SurfaceElement
                  , mat: Material
                  ) -> Option[(Ray, Color)] {
-        let buf_pos  = 16 * pixel * max_path_len_light;
-        let current_light_max_depth = buf.load_i32(buf_pos);
-        let current_light_depth = pick_light(rnd, current_light_max_depth);
-        //let current_light_depth = -1;
         
-        if(current_light_depth == 0){
-            // No shadow rays for specular materials
-            if mat.bsdf.is_specular || num_lights == 0 {
-                return(Option[(Ray, Color)]::None)
-            }
-            
-            if unrap_ptraypayload(payload).depth + 1 > max_path_len {
-                return(Option[(Ray, Color)]::None)
-            }
+        if num_lights == 0{
+            return(Option[(Ray, Color)]::None)
+        }
 
-            // Note: randi() returns random integers, but we only want positive integers here
-            let light_id      = pick_light(rnd, num_lights);
-            let light         = @lights(light_id);
-            let sample_direct = light.sample_direct;
-            let light_sample  = @sample_direct(rnd, surf);
+        let pt = unrap_ptraypayload(payload);
 
-            if light.infinite {
-                if light_sample.pdf_dir <= flt_eps {
-                    return(Option[(Ray, Color)]::None)
-                }
+        if pt.depth >= max_path_len {
+            return(Option[(Ray, Color)]::None)
+        }
 
-                let light_dir = light_sample.posdir; // Infinite lights return a direction instead of a position
-                let vis       = vec3_dot(light_dir, surf.local.col(2));
+        let light_buf_pos  = 16 * pixel * max_path_len_light;
+        let camera_buf_pos = 16 * pixel * max_path_len;
 
-                if vis > flt_eps {
-                    let in_dir  = light_dir; 
-                    let out_dir = vec3_neg(ray.dir);
+        
+        let light_id      = pick_light(rnd, num_lights);
+        let light         = @lights(light_id);
+        let sample_direct = light.sample_direct;
+        let light_sample  = @sample_direct(rnd, surf);
+        let light_pdf     = 1 / (num_lights as f32);
 
-                    let pdf_e     = if light.delta { 0 } else { mat.bsdf.pdf(in_dir, out_dir) }; // Pdf to sample the "infinite" light based on bsdf
-                    let pdf_l     = light_sample.pdf_dir * pdf_lightpick;                        // Pdf to sample the light based on NEE
-                    let inv_pdf_l = 1 / pdf_l;
-                    
-                    let mis = 1 / (1 + pdf_e * inv_pdf_l);
 
-                    let contrib = color_mul(light_sample.intensity, color_mul(unrap_ptraypayload(payload).contrib, mat.bsdf.eval(in_dir, out_dir)));
-
-                    return(make_option(
-                        make_ray(surf.point, light_dir, offset, flt_max),
-                        color_mulf(contrib, mis * inv_pdf_l)
-                    ))
-                }
-            }  else {
-                if light_sample.pdf_area <= flt_eps {
-                    return(Option[(Ray, Color)]::None)
-                }
-
-                let light_dir = vec3_sub(light_sample.posdir, surf.point);
-                let vis       = vec3_dot(light_dir, surf.local.col(2));
-
-                if vis > flt_eps && light_sample.cos > flt_eps {
-                    let inv_d   = 1 / vec3_len(light_dir);
-                    let inv_d2  = inv_d * inv_d;
-                    let in_dir  = vec3_mulf(light_dir, inv_d);
-                    let out_dir = vec3_neg(ray.dir);
-                    let cos_l   = light_sample.cos;
-
-                    let pdf_e     = if light.delta { 0 } else { mat.bsdf.pdf(in_dir, out_dir) * cos_l * inv_d2 };
-                    let pdf_l     = light_sample.pdf_area * pdf_lightpick;
-                    let inv_pdf_l = 1 / pdf_l;
-
-                    let mis = 1 / (1 + pdf_e * inv_pdf_l);
-                    let geom_factor = cos_l * inv_d2 * inv_pdf_l;
-
-                    let contrib = color_mul(light_sample.intensity, color_mul(unrap_ptraypayload(payload).contrib, mat.bsdf.eval(in_dir, out_dir)));
-
-                    return(make_option(
-                        make_ray(surf.point, light_dir, offset, 1 - offset),
-                        color_mulf(contrib, geom_factor * mis)
-                    ))
-                }
-            }
+        if light.infinite{
             return(Option[(Ray, Color)]::None)
         }else{
-            //TODO check the loading!!!!!
-            let buf_pos_added = buf_pos + current_light_depth * 16;
-            let mis0 = buf.load_f32(buf_pos_added + 2 - 16);//we need to load the last mis because the one bevor is dependend on the next angle
-            let pos1 = buf.load_vec3(buf_pos_added + 3);
-            let dir0 = buf.load_vec3(buf_pos_added + 6 - 16);//we load the last dir
-            let intensity0 = vec3_to_color(buf.load_vec3(buf_pos_added + 9 - 16));
-            
-            //TODO check this
-            let conection_dir = vec3_sub(surf.point, pos1);
-            let out_dir = vec3_neg(ray.dir);
+            if light_sample.pdf_area <= flt_eps{
+                return(Option[(Ray, Color)]::None)
+            }
+            let light_dir = vec3_sub(light_sample.posdir, surf.point);
+            let light_dist = vec3_len(light_dir);
+            let light_dist2 = light_dist * light_dist;
+            let wi = vec3_mulf(light_dir, 1/light_dist);
+            let wo = vec3_neg(ray.dir);
 
-            let pdf1 = mat.bsdf.pdf(dir0, conection_dir);
-            let color1 = mat.bsdf.eval(dir0, conection_dir);
-            //TODO ist das nicht ein problem da wir nicht die gleichen normalen haben!!!!!!!!!!!!!!!!!!
-            let pdf2 = mat.bsdf.pdf(conection_dir, out_dir);
-            let color2 = mat.bsdf.eval(conection_dir, out_dir);
+            let vis = vec3_dot(light_dir, surf.local.col(2));
+            if vis > flt_eps && light_sample.cos > flt_eps {
+                let cos_l = light_sample.cos;
+                let pdf_area = light_sample.pdf_area;
+                //let pdf_dir = light_sample.pdf_dir;
+                //TODO can we use cos_l here???
+                let pdf_dirpos = pdf_area * light_dist2 / (cos_l); //pdf_area should just be 1/area
 
-            let conection_mis = 1/(pdf1 * pdf2);
-            let new_mis = conection_mis * mis0;
-
-            let conection_contribution = color_mul(color_mul(unrap_ptraypayload(payload).contrib, color1), color2);
-
-            return(make_option(
-                make_ray(pos1, conection_dir, offset, 1 - offset),
-                color_mulf(color_mul(conection_contribution, intensity0), new_mis)
-            ))
+                let light_beta = color_mulf(light_sample.intensity, 1/(pdf_dirpos * light_pdf));
+                let f = mat.bsdf.eval(wi, wo); //Ich gehe davon aus das hier auch schon Cos drinnen ist?
+                let contri = color_mul(color_mul(light_beta, pt.contrib), f);
+                // if(pixel == 468613){
+                //     print_string("\n");
+                //     print_f32(1/pdf_dirpos);
+                //     print_string("\n");
+                //     print_f32(light_sample.pdf_area);
+                //     print_string("\n");
+                //     print_f32(pdf_lightpick);
+                //     print_string("\n");
+                //     print_f32(cos_l);
+                //     print_string("\n");
+                //     print_f32(1/light_dist2);
+                //     print_string("\n");
+                // }
+                return(make_option(
+                    make_ray(surf.point, light_dir, offset, 1 - offset),
+                    contri
+                ))
+            }else{
+                return(Option[(Ray, Color)]::None)
+            }
         }
+
+        // let current_light_max_depth = buf.load_i32(buf_pos);
+        // let current_light_depth = pick_light(rnd, current_light_max_depth);
+        // //let current_light_depth = -1;
+        
+        // if(current_light_depth == 0){
+        //     // No shadow rays for specular materials
+        //     if mat.bsdf.is_specular || num_lights == 0 {
+        //         return(Option[(Ray, Color)]::None)
+        //     }
+            
+        //     if unrap_ptraypayload(payload).depth + 1 > max_path_len {
+        //         return(Option[(Ray, Color)]::None)
+        //     }
+
+        //     // Note: randi() returns random integers, but we only want positive integers here
+        //     let light_id      = pick_light(rnd, num_lights);
+        //     let light         = @lights(light_id);
+        //     let sample_direct = light.sample_direct;
+        //     let light_sample  = @sample_direct(rnd, surf);
+
+        //     if light.infinite {
+        //         if light_sample.pdf_dir <= flt_eps {
+        //             return(Option[(Ray, Color)]::None)
+        //         }
+
+        //         let light_dir = light_sample.posdir; // Infinite lights return a direction instead of a position
+        //         let vis       = vec3_dot(light_dir, surf.local.col(2));
+
+        //         if vis > flt_eps {
+        //             let in_dir  = light_dir; 
+        //             let out_dir = vec3_neg(ray.dir);
+
+        //             let pdf_e     = if light.delta { 0 } else { mat.bsdf.pdf(in_dir, out_dir) }; // Pdf to sample the "infinite" light based on bsdf
+        //             let pdf_l     = light_sample.pdf_dir * pdf_lightpick;                        // Pdf to sample the light based on NEE
+        //             let inv_pdf_l = 1 / pdf_l;
+                    
+        //             let mis = 1 / (1 + pdf_e * inv_pdf_l);
+
+        //             let contrib = color_mul(light_sample.intensity, color_mul(unrap_ptraypayload(payload).contrib, mat.bsdf.eval(in_dir, out_dir)));
+
+        //             return(make_option(
+        //                 make_ray(surf.point, light_dir, offset, flt_max),
+        //                 color_mulf(contrib, mis * inv_pdf_l)
+        //             ))
+        //         }
+        //     }  else {
+        //         if light_sample.pdf_area <= flt_eps {
+        //             return(Option[(Ray, Color)]::None)
+        //         }
+
+        //         let light_dir = vec3_sub(light_sample.posdir, surf.point);
+        //         let vis       = vec3_dot(light_dir, surf.local.col(2));
+
+        //         if vis > flt_eps && light_sample.cos > flt_eps {
+        //             let inv_d   = 1 / vec3_len(light_dir);
+        //             let inv_d2  = inv_d * inv_d;
+        //             let in_dir  = vec3_mulf(light_dir, inv_d);
+        //             let out_dir = vec3_neg(ray.dir);
+        //             let cos_l   = light_sample.cos;
+
+        //             let pdf_e     = if light.delta { 0 } else { mat.bsdf.pdf(in_dir, out_dir) * cos_l * inv_d2 };
+        //             let pdf_l     = light_sample.pdf_area * pdf_lightpick;
+        //             let inv_pdf_l = 1 / pdf_l;
+
+        //             let mis = 1 / (1 + pdf_e * inv_pdf_l);
+        //             let geom_factor = cos_l * inv_d2 * inv_pdf_l;
+
+        //             let contrib = color_mul(light_sample.intensity, color_mul(unrap_ptraypayload(payload).contrib, mat.bsdf.eval(in_dir, out_dir)));
+
+        //             return(make_option(
+        //                 make_ray(surf.point, light_dir, offset, 1 - offset),
+        //                 color_mulf(contrib, geom_factor * mis)
+        //             ))
+        //         }
+        //     }
+        //     return(Option[(Ray, Color)]::None)
+        // }else{
+        //     //TODO check the loading!!!!!
+        //     let buf_pos_added = buf_pos + current_light_depth * 16;
+        //     let mis0 = buf.load_f32(buf_pos_added + 2 - 16);//we need to load the last mis because the one bevor is dependend on the next angle
+        //     let pos1 = buf.load_vec3(buf_pos_added + 3);
+        //     let dir0 = buf.load_vec3(buf_pos_added + 6 - 16);//we load the last dir
+        //     let intensity0 = vec3_to_color(buf.load_vec3(buf_pos_added + 9 - 16));
+            
+        //     //TODO check this
+        //     let conection_dir = vec3_sub(surf.point, pos1);
+        //     let out_dir = vec3_neg(ray.dir);
+
+        //     let pdf1 = mat.bsdf.pdf(dir0, conection_dir);
+        //     let color1 = mat.bsdf.eval(dir0, conection_dir);
+        //     //TODO ist das nicht ein problem da wir nicht die gleichen normalen haben!!!!!!!!!!!!!!!!!!
+        //     let pdf2 = mat.bsdf.pdf(conection_dir, out_dir);
+        //     let color2 = mat.bsdf.eval(conection_dir, out_dir);
+
+        //     let conection_mis = 1/(pdf1 * pdf2);
+        //     let new_mis = conection_mis * mis0;
+
+        //     let conection_contribution = color_mul(color_mul(unrap_ptraypayload(payload).contrib, color1), color2);
+
+        //     return(make_option(
+        //         make_ray(pos1, conection_dir, offset, 1 - offset),
+        //         color_mulf(color_mul(conection_contribution, intensity0), new_mis)
+        //     ))
+        // }
     }
 
     fn @on_hit( ray: Ray
@@ -174,12 +244,12 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
               , mat: Material
               ) -> Option[Color] {
         let pt = unrap_ptraypayload(payload);
-        if pt.depth == 1 {
-            aov_normal.splat(pixel, make_color(math_builtins::fabs(surf.local.col(2).x),
-                                               math_builtins::fabs(surf.local.col(2).y),
-                                               math_builtins::fabs(surf.local.col(2).z),
-                                               1));
-        }
+        // if pt.depth == 1 {
+        //     aov_normal.splat(pixel, make_color(math_builtins::fabs(surf.local.col(2).x),
+        //                                        math_builtins::fabs(surf.local.col(2).y),
+        //                                        math_builtins::fabs(surf.local.col(2).z),
+        //                                        1));
+        // }
 
         // Hits on a light source
         if mat.is_emissive && surf.is_entering {
@@ -187,13 +257,14 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
             let dot     = vec3_dot(out_dir, surf.local.col(2));
             if dot > flt_eps { // Only contribute proper aligned directions
                 let emit     = mat.emission(out_dir);
-                let next_mis = pt.mis * hit.distance * hit.distance / dot;
-                let mis      = 1 / (1 + next_mis * pdf_lightpick * emit.pdf_area);
-                let contrib  = color_mulf(color_mul(pt.contrib, emit.intensity), mis);
+                // let next_mis = pt.mis * hit.distance * hit.distance / dot;
+                // let mis      = 1 / (1 + next_mis * pdf_lightpick * emit.pdf_area);
+                // let contrib  = color_mulf(color_mul(pt.contrib, emit.intensity), mis);
                 
-                aov_di.splat(pixel, contrib);
-
-                return(make_option(contrib))
+                // //aov_di.splat(pixel, contrib);
+                let contrib = color_mul(pt.contrib, emit.intensity);
+                //return(make_option(contrib))
+                return(Option[Color]::None)
             }
         }
         Option[Color]::None
@@ -202,32 +273,33 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
     fn @on_miss( ray: Ray
                , pixel: i32
                , payload: RayPayload) -> Option[Color] {
-        let mut inflights = 0;
-        let mut color     = black;
+        // let mut inflights = 0;
+        // let mut color     = black;
 
-        // Due to the renderer design, this will only iterate through
-        // infinite lights, as a miss shader does not contain area lights
-        for light_id in unroll(0, num_lights) {
-            let light = @lights(light_id);
-            // Do not include delta lights or finite lights
-            if light.infinite && !light.delta {
-                let pt = unrap_ptraypayload(payload);
+        // // Due to the renderer design, this will only iterate through
+        // // infinite lights, as a miss shader does not contain area lights
+        // for light_id in unroll(0, num_lights) {
+        //     let light = @lights(light_id);
+        //     // Do not include delta lights or finite lights
+        //     if light.infinite && !light.delta {
+        //         let pt = unrap_ptraypayload(payload);
 
-                inflights += 1;
+        //         inflights += 1;
 
-                let out_dir = vec3_neg(ray.dir);
-                let emit    = light.emission(out_dir, make_invalid_surface_element());
-                let mis     = 1 / (1 + pt.mis * pdf_lightpick * emit.pdf_dir);
-                color = color_add(color, color_mulf(color_mul(pt.contrib, emit.intensity), mis));
-            }
-        }
+        //         let out_dir = vec3_neg(ray.dir);
+        //         let emit    = light.emission(out_dir, make_invalid_surface_element());
+        //         let mis     = 1 / (1 + pt.mis * pdf_lightpick * emit.pdf_dir);
+        //         color = color_add(color, color_mulf(color_mul(pt.contrib, emit.intensity), mis));
+        //     }
+        // }
 
-        if inflights > 0 {
-            aov_di.splat(pixel, color);
-            make_option(color)
-        } else {
-            Option[Color]::None
-        }
+        // if inflights > 0 {
+        //     aov_di.splat(pixel, color);
+        //     make_option(color)
+        // } else {
+        //     Option[Color]::None
+        // }
+        Option[Color]::None
     }
 
     fn @on_bounce( ray: Ray
@@ -239,24 +311,73 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
                  , mat: Material
                  ) -> Option[(Ray, RayPayload)] {
         let pt = unrap_ptraypayload(payload);
+
+        if pt.depth >= max_path_len {
+            return(Option[(Ray, RayPayload)]::None)
+        }
         // aov_stats.splat(pixel, make_color(if pt.depth == 1 { 2 } else { 1 }, 0, 0));
         // Bounce
-        let out_dir = vec3_neg(ray.dir);
-        if let Option[BsdfSample]::Some(mat_sample) = mat.bsdf.sample(rnd, out_dir, false) {
-            let rr_prob = russian_roulette_pbrt(color_mulf(pt.contrib, pt.eta * pt.eta), 0.95);
-            if pt.depth + 1 > max_path_len || randf(rnd) >= rr_prob {
-                return(Option[(Ray, RayPayload)]::None)
+        let wo = vec3_neg(ray.dir);
+        let buf_pos = 16 * pixel * max_path_len;
+
+        if let Option[BsdfSample]::Some(mat_sample) = mat.bsdf.sample(rnd, wo, false) {
+            let beta = pt.contrib;
+            let pdfFwd = pt.mis;
+            
+            // let rr_prob = russian_roulette_pbrt(color_mulf(pt.contrib, pt.eta * pt.eta), 0.95);
+            // if pt.depth + 1 > max_path_len || randf(rnd) >= rr_prob {
+            //     return(Option[(Ray, RayPayload)]::None)
+            // }
+            
+            let current_buf_pos = buf_pos + pt.depth * 16;
+            let prev_buf_pos = buf_pos + (pt.depth - 1) * 16;
+            // let contrib     = color_mul(pt.contrib, mat_sample.color/* Pdf and cosine are already applied!*/);
+            // let mis         = if mat.bsdf.is_specular { 0 } else { 1 / mat_sample.pdf };
+            // let new_contrib = color_mulf(contrib, 1 / rr_prob);
+
+            let current_pos = surf.point;
+            let current_normal = surf.face_normal;
+            
+            let mut correctedFwdPDF : f32 = 0.0;
+            
+            //TODO this seems to be a wrong way of handeling this problem
+            if(pt.depth != 1){
+                let prev_pos = camera_buf.load_vec3(prev_buf_pos + 4);
+                correctedFwdPDF = convertDensity(prev_pos, current_pos, current_normal, pdfFwd);
             }
 
-            let contrib     = color_mul(pt.contrib, mat_sample.color/* Pdf and cosine are already applied!*/);
-            let mis         = if mat.bsdf.is_specular { 0 } else { 1 / mat_sample.pdf };
-            let new_contrib = color_mulf(contrib, 1 / rr_prob);
+            //The current size of one data point is 16 bytes (valid: i32 (0, 1): 0, material: i32: 1, pdfFwd: f32 : 2, pdfRev: f32: 3, pos: vec3 : 4, normal: vec3 : 7, beta: vec3 : 10, wo: vec3 : 13)
+            camera_buf.store_int2(current_buf_pos, 1, -1);
+            camera_buf.store_f32(current_buf_pos + 2, correctedFwdPDF);
+            camera_buf.store_f32(current_buf_pos + 3, 0.0);
+            camera_buf.store_vec3(current_buf_pos + 4, current_pos);
+            camera_buf.store_vec3(current_buf_pos + 7, current_normal);
+            camera_buf.store_vec3(current_buf_pos + 10, color_to_vec3(beta));
+            camera_buf.store_vec3(current_buf_pos + 13, wo);
+
+            // if(pixel == 468613){
+            //     print_string("\n");
+            //     print_i32(pt.depth);
+            //     print_string("\n");
+            //     print_f32(beta.r);
+            //     print_string("\n");
+            //     print_f32(mat_sample.color.r);
+            //     print_string("\n");
+            //     print_f32(pdfFwd);
+            //     print_string("\n");
+            // }
+
+            let next_pdf = mat_sample.pdf;
+            if next_pdf == 0.0{
+                return(Option[(Ray, RayPayload)]::None)
+            }
+            let next_contri = color_mul(beta, mat_sample.color); //cos and pdf is already applied
 
             make_option(
                 make_ray(surf.point, mat_sample.in_dir, offset, flt_max),
                 wrap_ptraypayload(PTRayPayload {
-                    mis     = mis,
-                    contrib = new_contrib,
+                    mis     = next_pdf,
+                    contrib = next_contri,
                     depth   = pt.depth + 1,
                     eta     = pt.eta * mat_sample.eta
                 })
