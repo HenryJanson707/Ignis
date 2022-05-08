@@ -77,7 +77,7 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
         let light_buf_pos  = 16 * pixel * max_path_len_light;
         let camera_buf_pos = 16 * pixel * max_path_len;
 
-        let s = 1;
+        let s = 2;
 
         if s == 1{
             let light_id      = pick_light(rnd, num_lights);
@@ -150,7 +150,7 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
             let camera_wi = vec3_mulf(light_dir, 1/light_dist);
             let light_wo = vec3_neg(camera_wi);
             
-            let geom_factor = 1 /light_dist2; //the two cos factors should be in in the two bsdf calculations
+            let geom_factor = 1 / light_dist2; //the two cos factors should be in in the two bsdf calculations
             let camera_bsdf = mat.bsdf.eval(camera_wi, camera_wo);
 
             let light_surf = SurfaceElement{
@@ -169,11 +169,23 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
             let conection = color_mulf(color_mul(camera_bsdf, light_bsdf), geom_factor);
             let contri = color_mul(color_mul(conection, camera_beta), light_beta);
          
-            // if(pixel == 468613){
+            // if(contri.r > 100000){
+            //     print_string("\n");
+            //     print_f32(light_dist);
+            //     print_string("\n");
+            //     print_f32(geom_factor);
+            //     print_string("\n");
+            //     print_f32(light_bsdf.r);print_string(",");print_f32(light_bsdf.g);print_string(",");print_f32(light_bsdf.b);print_string(",");
+            //     print_string("\n");
+            //     print_f32(conection.r);print_string(",");print_f32(conection.g);print_string(",");print_f32(conection.b);print_string(",");
             //     print_string("\n");
             //     print_f32(light_pos.x);print_string(",");print_f32(light_pos.y);print_string(",");print_f32(light_pos.z);print_string(",");
             //     print_string("\n");
+            //     print_f32(surf.point.x);print_string(",");print_f32(surf.point.y);print_string(",");print_f32(surf.point.z);print_string(",");
+            //     print_string("\n");
             //     print_f32(light_normal.x);print_string(",");print_f32(light_normal.y);;print_string(",");print_f32(light_normal.z);;print_string(",");
+            //     print_string("\n");
+            //     print_f32(surf.face_normal.x);print_string(",");print_f32(surf.face_normal.y);;print_string(",");print_f32(surf.face_normal.z);;print_string(",");
             //     print_string("\n");
             //     print_f32(light_beta.r);print_string(",");print_f32(light_beta.g);print_string(",");print_f32(light_beta.b);print_string(",");
             //     print_string("\n");
