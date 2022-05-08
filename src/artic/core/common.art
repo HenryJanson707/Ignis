@@ -8,6 +8,12 @@ static flt_pi     = 3.14159265359:f32;
 static flt_inv_pi = 0.31830988618379067154:f32;
 static flt_sqrt2  = 1.41421356237:f32;
 static flt_sqrt3  = 1.73205080757:f32;
+static flt_e      = 2.71828182845904523536:f32;
+
+// Convert from radians to degree
+fn deg(v: f32) = v * 180 * flt_inv_pi;
+// Convert from degree to radians
+fn rad(v: f32) = v / 180 * flt_pi;
 
 // Option --------------------------------------------------------------------------
 
@@ -123,6 +129,9 @@ fn @lerp2(a: f32, b: f32, c: f32, k1: f32, k2: f32) -> f32 {
     (1 - k1 - k2) * a + k1 * b + k2 * c
 }
 
+fn @smoothstep(x: f32)   = x * x * (3 - 2 * x);
+fn @smootherstep(x: f32) = x * x * x * (x * (x * 6 - 15) + 10);
+
 // a*b - c*d
 fn @diff_of_prod(a: f32, b: f32, c: f32, d: f32) -> f32 {
     let cd   = c * d;
@@ -183,3 +192,7 @@ fn @safe_unroll(body: fn(i32) -> ()) {
 }
 
 #[import(cc = "device", name = "llvm.fma.f32")] fn fmaf(f32, f32, f32) -> f32;
+
+// The following stuff is only for development purposes and should never ever be in production code
+#[import(cc = "device", name = "llvm.debugtrap")] fn ig_trap() -> ();
+#[import(cc = "device", name = "llvm.ubsantrap")] fn ig_trap_annotated(u8) -> ();

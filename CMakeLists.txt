@@ -55,18 +55,33 @@ option(IG_WITH_TRACER        "Build tracing frontend igtrace" ON)
 option(IG_WITH_PYTHON_API    "Build python API" ON)
 option(IG_WITH_TOOLS         "Build tools" ON)
 option(IG_WITH_DOCUMENTATION "Build the documentation if Sphinx is available on the system" ON)
+option(IG_WITH_ASSERTS       "Build with asserts even in release. It is always enabled on debug" OFF)
+option(IG_USE_LTO 			 "Use linked time optimization if available in release" ON)
 
 # Setup artic clang flags
-set(IG_ARTIC_CLANG_FLAGS -march=native -ffast-math CACHE STRING "Additional artic clang compilation options")
+if(APPLE)
+	set(IG_ARTIC_CLANG_FLAGS_DEFAULT -ffast-math)
+else()
+	set(IG_ARTIC_CLANG_FLAGS_DEFAULT -march=native -ffast-math)
+endif()
+set(IG_ARTIC_CLANG_FLAGS ${IG_ARTIC_CLANG_FLAGS_DEFAULT} CACHE STRING "Additional artic clang compilation options")
 set(IG_ARTIC_FLAGS CACHE STRING "Additional artic compilation options")
 mark_as_advanced(IG_ARTIC_CLANG_FLAGS IG_ARTIC_FLAGS)
 
 # Setup CPM
+include(cmake/LTO.cmake)
 include(cmake/SetupCPM.cmake)
+
+# Locate stuff for windows
+# On Linux this is properly propagated
+# So it needs a fixing in AnyDSL
+if(WIN32)
+	find_package(CUDAToolkit)
+	find_package(OpenCL)
+endif()
 
 # Locate AnyDSL runtime
 find_package(AnyDSL_runtime REQUIRED)
-include_directories(${AnyDSL_runtime_INCLUDE_DIRS})
 
 # Make sure the filesystem library is available
 find_package(Filesystem REQUIRED)
@@ -80,11 +95,9 @@ find_package(TBB REQUIRED)
 # ZLib is used in the generator
 find_package(ZLIB REQUIRED)
 
-# Make use of OpenMP if available
-find_package(OpenMP)
-
 include(cmake/GetDependencies.cmake)
 include(cmake/Install.cmake)
+include(cmake/ExtraUtils.cmake)
 
 # Enable folders for Visual Studio
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
@@ -130,7 +143,7 @@ configure_file(src/backend/runtime/config/Version.h.in ${CMAKE_CURRENT_BINARY_DI
 
 # Add warnings per default
 if(MSVC)
-  add_compile_options(/W4 /WX)
+  add_compile_options(/W4)
 else()
   add_compile_options(-Wall -Wextra -pedantic)
 endif()

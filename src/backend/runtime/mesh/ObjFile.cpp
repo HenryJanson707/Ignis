@@ -4,8 +4,7 @@
 #define TINYOBJLOADER_IMPLEMENTATION
 #include "tiny_obj_loader.h"
 
-namespace IG {
-namespace obj {
+namespace IG::obj {
 // Only partial Wavefront support -> No normal or texcoords indices supported
 TriMesh load(const std::filesystem::path& path)
 {
@@ -16,7 +15,7 @@ TriMesh load(const std::filesystem::path& path)
     std::string warn;
     std::string err;
 
-    bool ret = tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, path.c_str());
+    bool ret = tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, path.generic_u8string().c_str());
 
     if (!warn.empty())
         IG_LOG(L_WARNING) << "ObjFile " << path << ": " << warn << std::endl;
@@ -39,24 +38,24 @@ TriMesh load(const std::filesystem::path& path)
     const bool hasCoords = (attrib.texcoords.size() / 2 == attrib.vertices.size() / 3);
 
     size_t indices_count = 0;
-    for (size_t sh = 0; sh < shapes.size(); ++sh)
-        indices_count += shapes[sh].mesh.indices.size();
+    for (const auto& shape : shapes)
+        indices_count += shape.mesh.indices.size();
 
     TriMesh tri_mesh;
 
     // Indices
     tri_mesh.indices.reserve(indices_count * 4);
-    for (size_t s = 0; s < shapes.size(); s++) {
+    for (const auto& shape : shapes) {
         // Loop over faces(polygon)
         size_t index_offset = 0;
-        for (size_t f = 0; f < shapes[s].mesh.num_face_vertices.size(); f++) {
-            int fv = shapes[s].mesh.num_face_vertices[f];
+        for (size_t f = 0; f < shape.mesh.num_face_vertices.size(); f++) {
+            int fv = shape.mesh.num_face_vertices[f];
             IG_ASSERT(fv == 3, "Expected tinyobjloader generating triangular data!");
 
-            tri_mesh.indices.push_back(shapes[s].mesh.indices[index_offset + 0].vertex_index);
-            tri_mesh.indices.push_back(shapes[s].mesh.indices[index_offset + 1].vertex_index);
-            tri_mesh.indices.push_back(shapes[s].mesh.indices[index_offset + 2].vertex_index);
-            tri_mesh.indices.push_back(shapes[s].mesh.material_ids[f]); // Last entry is material index
+            tri_mesh.indices.push_back(shape.mesh.indices[index_offset + 0].vertex_index);
+            tri_mesh.indices.push_back(shape.mesh.indices[index_offset + 1].vertex_index);
+            tri_mesh.indices.push_back(shape.mesh.indices[index_offset + 2].vertex_index);
+            tri_mesh.indices.push_back(shape.mesh.material_ids[f]); // Last entry is material index
             index_offset += fv;
         }
     }
@@ -66,11 +65,17 @@ TriMesh load(const std::filesystem::path& path)
     for (size_t v = 0; v < attrib.vertices.size() / 3; ++v)
         tri_mesh.vertices.emplace_back(attrib.vertices[3 * v + 0], attrib.vertices[3 * v + 1], attrib.vertices[3 * v + 2]);
 
+    // Cleanup
+    // TODO: This does not work due to fp precision problems
+    // const size_t removedBadAreas = tri_mesh.removeZeroAreaTriangles();
+    // if (removedBadAreas != 0)
+    //     IG_LOG(L_WARNING) << "ObjFile " << path << ": Removed " << removedBadAreas << " triangles with zero area" << std::endl;
+
     // Normals
     bool hasBadAreas = false;
     tri_mesh.computeFaceNormals(&hasBadAreas);
-    if (hasBadAreas)
-        IG_LOG(L_WARNING) << "ObjFile " << path << ": Triangle mesh contains triangles with zero area" << std::endl;
+    // if (hasBadAreas)
+    //     IG_LOG(L_WARNING) << "ObjFile " << path << ": Triangle mesh contains triangles with zero area" << std::endl;
 
     if (hasNorms) {
         tri_mesh.normals.reserve(attrib.normals.size() / 3);
@@ -98,5 +103,4 @@ TriMesh load(const std::filesystem::path& path)
 
     return tri_mesh;
 }
-} // namespace obj
-} // namespace IG
+} // namespace IG::obj

@@ -2,6 +2,12 @@
 #include <sstream>
 
 namespace IG {
+Statistics::Statistics()
+    : mQuantities()
+{
+    std::fill(mQuantities.begin(), mQuantities.end(), 0);
+}
+
 void Statistics::beginShaderLaunch(ShaderType type, size_t id)
 {
     ShaderStats* stats = getStats(type, id);
@@ -29,9 +35,14 @@ void Statistics::add(const Statistics& other)
         addStats(mHitStats[pair.first], pair.second);
     addStats(mAdvancedShadowHitStats, other.mAdvancedShadowHitStats);
     addStats(mAdvancedShadowMissStats, other.mAdvancedShadowMissStats);
+    addStats(mTonemapStats, other.mTonemapStats);
+    addStats(mImageInfoStats, other.mImageInfoStats);
+
+    for (size_t i = 0; i < other.mQuantities.size(); ++i)
+        mQuantities[i] += other.mQuantities[i];
 }
 
-std::string Statistics::dump(size_t iter, bool verbose) const
+std::string Statistics::dump(size_t totalMS, size_t iter, bool verbose) const
 {
     const auto dumpInline = [=](size_t count, size_t elapsedMS) {
         std::stringstream bstream;
@@ -43,6 +54,12 @@ std::string Statistics::dump(size_t iter, bool verbose) const
 
     const auto dumpStats = [=](const ShaderStats& stats) {
         return dumpInline(stats.count, stats.elapsedMS);
+    };
+
+    const auto dumpQuantity = [=](size_t count) {
+        std::stringstream bstream;
+        bstream << count / totalMS << " per ms [" << count << "]";
+        return bstream.str();
     };
 
     // Get all hits information
@@ -73,6 +90,19 @@ std::string Statistics::dump(size_t iter, bool verbose) const
                << "      Hits> " << dumpStats(mAdvancedShadowHitStats) << std::endl;
     }
 
+    if (mImageInfoStats.count > 0)
+        stream << "    ImageInfo>     " << dumpStats(mImageInfoStats) << std::endl;
+
+    if (mTonemapStats.count > 0)
+        stream << "    Tonemap>       " << dumpStats(mTonemapStats) << std::endl;
+
+    stream << "  Quantities:" << std::endl
+           << "    CameraRays>  " << dumpQuantity(mQuantities[(size_t)Quantity::CameraRayCount]) << std::endl
+           << "    ShadowRays>  " << dumpQuantity(mQuantities[(size_t)Quantity::ShadowRayCount]) << std::endl
+           << "    BounceRays>  " << dumpQuantity(mQuantities[(size_t)Quantity::BounceRayCount]) << std::endl
+           << "    PrimaryRays> " << dumpQuantity(mQuantities[(size_t)Quantity::CameraRayCount] + mQuantities[(size_t)Quantity::BounceRayCount]) << std::endl
+           << "    TotalRays>   " << dumpQuantity(mQuantities[(size_t)Quantity::CameraRayCount] + mQuantities[(size_t)Quantity::BounceRayCount] + mQuantities[(size_t)Quantity::ShadowRayCount]) << std::endl;
+
     return stream.str();
 }
 
@@ -92,6 +122,10 @@ Statistics::ShaderStats* Statistics::getStats(ShaderType type, size_t id)
         return &mAdvancedShadowHitStats;
     case ShaderType::AdvancedShadowMiss:
         return &mAdvancedShadowMissStats;
+    case ShaderType::Tonemap:
+        return &mTonemapStats;
+    case ShaderType::ImageInfo:
+        return &mImageInfoStats;
     }
 }
 } // namespace IG

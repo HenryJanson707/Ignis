@@ -5,10 +5,17 @@
 
 namespace IG {
 Logger::Logger()
-#ifdef IG_DEBUG
-    : mVerbosity(L_DEBUG)
+    : mConsoleLogListener(std::make_shared<ConsoleLogListener>(
+#ifdef IG_OS_LINUX
+        true
 #else
-    : mVerbosity(L_INFO)
+        false
+#endif
+        ))
+#ifdef IG_DEBUG
+    , mVerbosity(L_DEBUG)
+#else
+    , mVerbosity(L_INFO)
 #endif
     , mQuiet(false)
     , mEmptyStreamBuf(*this, true)
@@ -16,23 +23,14 @@ Logger::Logger()
     , mStreamBuf(*this, false)
     , mStream(&mStreamBuf)
 {
-    mConsoleLogListener = std::make_shared<ConsoleLogListener>(
-#ifdef IG_OS_LINUX
-        true
-#else
-        false
-#endif
-    );
-
     addListener(mConsoleLogListener);
-}
-
-Logger::~Logger()
-{
 }
 
 Logger& Logger::operator=(const Logger& other)
 {
+    if (this == &other)
+        return *this;
+
     mVerbosity          = other.mVerbosity;
     mQuiet              = other.mQuiet;
     mConsoleLogListener = other.mConsoleLogListener;
@@ -40,7 +38,7 @@ Logger& Logger::operator=(const Logger& other)
     return *this;
 }
 
-const char* levelStr[] = {
+static const char* const levelStr[] = {
     "Debug  ",
     "Info   ",
     "Warning",
@@ -102,7 +100,7 @@ std::streambuf::int_type Logger::StreamBuf::overflow(std::streambuf::int_type c)
         return 0;
 
     for (const auto& listener : mLogger.mListener)
-        listener->writeEntry(c);
+        listener->writeEntry((char)c);
 
     return 0;
 }

@@ -3,7 +3,6 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
-#include "Camera.h"
 #include "Runtime.h"
 
 #define STRINGIFY(x) #x
@@ -11,6 +10,51 @@
 
 namespace py = pybind11;
 using namespace IG;
+
+static void flush_io()
+{
+    std::cout.flush();
+    std::cerr.flush();
+}
+
+class RuntimeWrap {
+    std::unique_ptr<Runtime> mInstance;
+
+    RuntimeOptions mOptions;
+    std::string mSource;
+    std::string mPath;
+
+public:
+    RuntimeWrap(const RuntimeOptions& opts, const std::string& source, const std::string& path)
+        : mOptions(opts)
+        , mSource(source)
+        , mPath(path)
+    {
+        IG_ASSERT(source.empty() ^ path.empty(), "Only source or a path is allowed");
+    }
+
+    Runtime* enter()
+    {
+        mInstance = std::make_unique<Runtime>(mOptions);
+
+        if (mSource.empty()) {
+            if (!mInstance->loadFromFile(mPath))
+                return nullptr;
+        } else {
+            if (!mInstance->loadFromString(mSource))
+                return nullptr;
+        }
+
+        return mInstance.get();
+    }
+
+    bool exit(const py::object&, const py::object&, const py::object&)
+    {
+        mInstance.reset();
+        flush_io();
+        return true; // TODO: Be more sensitive?
+    }
+};
 
 PYBIND11_MODULE(pyignis, m)
 {
@@ -24,26 +68,27 @@ PYBIND11_MODULE(pyignis, m)
 
     m.attr("__version__") = MACRO_STRINGIFY(IGNIS_VERSION);
 
+    // Logger IO stuff
+    m.def("flush_log", flush_io);
+
     py::class_<RuntimeOptions>(m, "RuntimeOptions")
         .def(py::init([]() { return RuntimeOptions(); }))
         .def_readwrite("DesiredTarget", &RuntimeOptions::DesiredTarget)
+        .def_readwrite("RecommendCPU", &RuntimeOptions::RecommendCPU)
+        .def_readwrite("RecommendGPU", &RuntimeOptions::RecommendGPU)
+        .def_readwrite("DumpShader", &RuntimeOptions::DumpShader)
+        .def_readwrite("DumpShaderFull", &RuntimeOptions::DumpShaderFull)
+        .def_readwrite("AcquireStats", &RuntimeOptions::AcquireStats)
         .def_readwrite("Device", &RuntimeOptions::Device)
         .def_readwrite("OverrideCamera", &RuntimeOptions::OverrideCamera)
-        .def_readwrite("OverrideTechnique", &RuntimeOptions::OverrideTechnique);
+        .def_readwrite("OverrideTechnique", &RuntimeOptions::OverrideTechnique)
+        .def_property(
+            "ModulePath", [](const RuntimeOptions& opts) { return opts.ModulePath.generic_u8string(); }, [](RuntimeOptions& opts, const std::string& val) { opts.ModulePath = val; });
 
     py::class_<RuntimeRenderSettings>(m, "RuntimeRenderSettings")
         .def(py::init([]() { return RuntimeRenderSettings(); }))
         .def_readwrite("FilmWidth", &RuntimeRenderSettings::FilmWidth)
         .def_readwrite("FilmHeight", &RuntimeRenderSettings::FilmHeight);
-
-    py::class_<Camera>(m, "Camera")
-        .def(py::init([](const Vector3f& e, const Vector3f& d, const Vector3f& u, float fov, float ratio, float tmin, float tmax) { return Camera(e, d, u, fov, ratio, tmin, tmax); }))
-        .def_readwrite("Eye", &Camera::Eye)
-        .def_readwrite("Direction", &Camera::Direction)
-        .def_readwrite("Right", &Camera::Right)
-        .def_readwrite("Up", &Camera::Up)
-        .def_readwrite("SensorWidth", &Camera::SensorWidth)
-        .def_readwrite("SensorHeight", &Camera::SensorHeight);
 
     py::class_<Ray>(m, "Ray")
         .def(py::init([](const Vector3f& org, const Vector3f& dir) { return Ray{ org, dir, Vector2f(0, 1) }; }))
@@ -63,9 +108,6 @@ PYBIND11_MODULE(pyignis, m)
         .value("AMDGPU", Target::AMDGPU);
 
     py::class_<Runtime>(m, "Runtime")
-        .def(py::init([](const std::string& path) { return std::make_unique<Runtime>(path, RuntimeOptions()); }))
-        .def(py::init([](const std::string& path, const RuntimeOptions& opts) { return std::make_unique<Runtime>(path, opts); }))
-        .def("setup", &Runtime::setup)
         .def("step", &Runtime::step)
         .def("trace", [](Runtime& r, const std::vector<Ray>& rays) {
             std::vector<float> data;
@@ -74,16 +116,27 @@ PYBIND11_MODULE(pyignis, m)
         })
         .def("reset", &Runtime::reset)
         .def("getFramebuffer", [](const Runtime& r, uint32 aov) {
-            const size_t width  = r.loadedRenderSettings().FilmWidth;
-            const size_t height = r.loadedRenderSettings().FilmHeight;
+            const size_t width  = r.framebufferWidth();
+            const size_t height = r.framebufferHeight();
             return py::memoryview::from_buffer(
-                r.getFramebuffer(aov),                                          // buffer pointer
-                { height, width, 3ul },                                         // shape (rows, cols)
-                { sizeof(float) * width * 3, sizeof(float) * 3, sizeof(float) } // strides in bytes
+                r.getFramebuffer(aov),                                                             // buffer pointer
+                std::vector<size_t>{ height, width, 3ul },                                         // shape (rows, cols)
+                std::vector<size_t>{ sizeof(float) * width * 3, sizeof(float) * 3, sizeof(float) } // strides in bytes
             );
         })
-        .def("clearFramebuffer", &Runtime::clearFramebuffer)
+        .def("clearFramebuffer", py::overload_cast<>(&Runtime::clearFramebuffer))
+        .def("clearFramebuffer", py::overload_cast<size_t>(&Runtime::clearFramebuffer))
         .def_property_readonly("iterationCount", &Runtime::currentIterationCount)
-        .def_property_readonly("iterationCountForFramebuffer", &Runtime::currentIterationCountForFramebuffer)
-        .def_property_readonly("loadedRenderSettings", &Runtime::loadedRenderSettings);
+        .def_property_readonly("sampleCount", &Runtime::currentSampleCount)
+        .def_property_readonly("framebufferWidth", &Runtime::framebufferWidth)
+        .def_property_readonly("framebufferHeight", &Runtime::framebufferHeight);
+
+    py::class_<RuntimeWrap>(m, "RuntimeWrap")
+        .def("__enter__", &RuntimeWrap::enter, py::return_value_policy::reference)
+        .def("__exit__", &RuntimeWrap::exit);
+
+    m.def("loadFromFile", [](const std::string& path) { return std::make_unique<RuntimeWrap>(RuntimeOptions(), std::string{}, path); });
+    m.def("loadFromFile", [](const std::string& path, const RuntimeOptions& opts) { return std::make_unique<RuntimeWrap>(opts, std::string{}, path); });
+    m.def("loadFromString", [](const std::string& str) { return std::make_unique<RuntimeWrap>(RuntimeOptions(), str, std::string{}); });
+    m.def("loadFromString", [](const std::string& str, const RuntimeOptions& opts) { return std::make_unique<RuntimeWrap>(opts, str, std::string{}); });
 }

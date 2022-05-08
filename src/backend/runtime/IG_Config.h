@@ -3,7 +3,7 @@
 #define IG_STRINGIFY(str) #str
 #define IG_DOUBLEQUOTE(str) IG_STRINGIFY(str)
 
-//OS
+// OS
 #if defined(__linux) || defined(linux)
 #define IG_OS_LINUX
 #elif defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__WINDOWS__) || defined(__TOS_WIN__)
@@ -13,11 +13,13 @@
 #else
 #define IG_OS_WINDOWS_64
 #endif
+#elif defined(__APPLE__)
+#define IG_OS_APPLE
 #else
 #error Your operating system is currently not supported
 #endif
 
-//Compiler
+// Compiler
 #if defined(__CYGWIN__)
 #define IG_CC_CYGWIN
 #endif
@@ -44,9 +46,17 @@
 #endif
 
 // Check if C++17
-#if __cplusplus < 201703L
-#warning Ignis requires C++17 to compile successfully
+#ifdef IG_CC_MSC
+#define IG_CPP_LANG _MSVC_LANG
+#else
+#define IG_CPP_LANG __cplusplus
 #endif
+
+#if IG_CPP_LANG < 201703L
+#pragma warning Ignis requires C++ 17 to compile successfully
+#endif
+
+#define IG_PRAGMA(x) _Pragma(#x)
 
 // clang-format off
 #define IG_UNUSED(expr) do { (void)(expr); } while (false)
@@ -56,9 +66,13 @@
 #ifdef IG_CC_MSC
 #define IG_DEBUG_BREAK() __debugbreak()
 #define IG_FUNCTION_NAME __FUNCSIG__
-#else //FIXME: Really use cpu dependent assembler?
+#define IG_BEGIN_IGNORE_WARNINGS IG_PRAGMA(warning(push, 0))
+#define IG_END_IGNORE_WARNINGS IG_PRAGMA(warning(pop))
+#else // FIXME: Really use cpu dependent assembler?
 #define IG_DEBUG_BREAK() __asm__ __volatile__("int $0x03")
 #define IG_FUNCTION_NAME __PRETTY_FUNCTION__
+#define IG_BEGIN_IGNORE_WARNINGS
+#define IG_END_IGNORE_WARNINGS
 #endif
 
 #if defined(IG_CC_GNU) || defined(IG_CC_CLANG)
@@ -73,7 +87,7 @@
 
 #define IG_RESTRICT __restrict
 
-#if !defined(IG_NO_ASSERTS) && defined(IG_DEBUG)
+#if defined(IG_WITH_ASSERTS) || (!defined(IG_NO_ASSERTS) && defined(IG_DEBUG))
 #include <assert.h>
 #define _IG_ASSERT_MSG(msg)                                 \
     std::cerr << "[IGNIS] ASSERT | " << __FILE__            \
@@ -106,16 +120,14 @@ private:                         \
     C(C&&)     = delete;         \
     C& operator=(C&&) = delete
 
-#define IG_CLASS_NON_COPYABLE(C)     \
-private:                             \
-    C(const C&) = delete;            \
-    C& operator=(const C&) = delete; \
-    IG_CLASS_NON_MOVEABLE(C)
+#define IG_CLASS_NON_COPYABLE(C) \
+private:                         \
+    C(const C&) = delete;        \
+    C& operator=(const C&) = delete
 
 #define IG_CLASS_NON_CONSTRUCTABLE(C) \
 private:                              \
-    C() = delete;                     \
-    IG_CLASS_NON_COPYABLE(C)
+    C() = delete
 
 #define IG_CLASS_STACK_ONLY(C)                     \
 private:                                           \
@@ -145,12 +157,16 @@ private:                                           \
 #endif
 
 // Useful includes
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
 #include <iostream>
 #include <memory>
+#include <optional>
+#include <unordered_map>
+#include <vector>
 
 // Eigen3 Library
 #include <Eigen/Dense>
@@ -195,6 +211,7 @@ using Vector4f = Eigen::Vector4f;
 using Vector4i = Eigen::Vector4i;
 
 /* Precise matrix types */
+using Matrix2f = Eigen::Matrix2f;
 using Matrix3f = Eigen::Matrix3f;
 using Matrix4f = Eigen::Matrix4f;
 
@@ -208,13 +225,13 @@ constexpr float FltEps = std::numeric_limits<float>::epsilon();
 constexpr float FltInf = std::numeric_limits<float>::infinity();
 constexpr float FltMax = std::numeric_limits<float>::max();
 
-constexpr float Pi     = 3.14159265358979323846;
-constexpr float InvPi  = 0.31830988618379067154; // 1/pi
-constexpr float Inv2Pi = 0.15915494309189533577; // 1/(2pi)
-constexpr float Inv4Pi = 0.07957747154594766788; // 1/(4pi)
-constexpr float Pi2    = 1.57079632679489661923; // pi half
-constexpr float Pi4    = 0.78539816339744830961; // pi quarter
-constexpr float Sqrt2  = 1.41421356237309504880;
+constexpr float Pi     = 3.14159265358979323846f;
+constexpr float InvPi  = 0.31830988618379067154f; // 1/pi
+constexpr float Inv2Pi = 0.15915494309189533577f; // 1/(2pi)
+constexpr float Inv4Pi = 0.07957747154594766788f; // 1/(4pi)
+constexpr float Pi2    = 1.57079632679489661923f; // pi half
+constexpr float Pi4    = 0.78539816339744830961f; // pi quarter
+constexpr float Sqrt2  = 1.41421356237309504880f;
 
 constexpr float Deg2Rad = Pi / 180.0f;
 constexpr float Rad2Deg = 180.0f * InvPi;
@@ -224,5 +241,13 @@ template <typename T>
 inline T clamp(const T& a, const T& b, const T& c)
 {
     return (a < b) ? b : ((a > c) ? c : a);
+}
+
+/// Transform string to lowercase
+inline std::string to_lowercase(const std::string& str)
+{
+    std::string tmp = str;
+    std::transform(tmp.begin(), tmp.end(), tmp.begin(), [](const std::string::value_type& v) { return static_cast<std::string::value_type>(::tolower((int)v)); });
+    return tmp;
 }
 } // namespace IG

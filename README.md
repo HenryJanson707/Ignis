@@ -1,7 +1,7 @@
 # Ignis ![Build](https://img.shields.io/github/workflow/status/PearCoding/Ignis/Docker%20AVX2) [![Docker Pulls](https://img.shields.io/docker/pulls/pearcoding/ignis)](https://hub.docker.com/repository/docker/pearcoding/ignis)
-'Ignis' is a raytracer for the RENEGADE project implemented using the Artic frontend of the AnyDSL compiler framework (https://anydsl.github.io/) and based on Rodent (https://github.com/AnyDSL/rodent).
+'Ignis' is a raytracer for the RENEGADE project implemented using the Artic frontend of the AnyDSL compiler framework (https://anydsl.github.io/) and based on Rodent (https://github.com/AnyDSL/rodent). The renderer is usable on all three major platforms (Linux, Windows, MacOs).
 
-![A scene containing diamonds rendered by Ignis](docs/screenshot.jpg)
+![A scene containing diamonds rendered by Ignis with photonmapping](docs/screenshot.jpeg)
 
 ## Gallery
 
@@ -10,6 +10,10 @@ Some scenes rendered with Ignis. Acquired from https://benedikt-bitterli.me/reso
 ![Bedroom scene by SlykDrako](docs/gallery1.jpeg)
 
 ![Livingroom scene by Jay-Artist](docs/gallery2.jpeg)
+
+A sample scene from https://github.com/KhronosGroup/glTF-Sample-Models directly rendered within `igview`.
+
+![DragonAttenuation scene by Stanford Scan and Morgan McGuire's Computer Graphics Archive](docs/gallery3.jpeg)
 
 ## Dependencies
 
@@ -28,9 +32,9 @@ Have a look at [CPM](https://github.com/cpm-cmake/CPM.cmake) for more informatio
 
  - imgui <https://github.com/ocornut/imgui>
  - imgui-markdown <https://github.com/juliettef/imgui_markdown>
+ - PExpr <https://github.com/PearCoding/PExpr>
  - pugixml <https://github.com/zeux/pugixml>
  - RapidJSON <https://rapidjson.org/>
- - Simple Hardware Feature Extractor <https://github.com/PearCoding/hwinfo>
  - Simple Tag Preprocessor <https://github.com/PearCoding/stpp>
  - stb <https://github.com/nothings/stb>
  - tinyexr <https://github.com/syoyo/tinyexr>
@@ -56,6 +60,8 @@ Next step would be to configure and finally build the framework. You might use y
     cmake --build .
 
 If `Ninja` is not available, skip the `-G Ninja` parameter. You can also set `FETCHCONTENT_UPDATES_DISCONNECTED` to `ON` to speed up the cmake steps after the initial cmake configuration.  
+
+More information about building Ignis on other systems are available at the documentation [online](https://pearcoding.github.io/Ignis/src/getting_started/compiling.html) or in the offline version of the documentation in `docs/`
 
 ## Backends
 
@@ -92,10 +98,12 @@ All available components are documented in the `docs/` folder. A documentation c
 
 from the `build/` folder.
 
+A quite recent version of the above documentation is available at: https://pearcoding.github.io/Ignis/ 
+
 ## Scene description
 
-Ignis uses a JSON based flat scene description with instancing. Support for shading nodes is planned. Image and procedural texture support is available.
-A schema is available at [refs/ignis.schema.json](refs/ignis.schema.json)
+Ignis uses a JSON based flat scene description with instancing. Support for shading nodes is available via PExpr, image and procedural textures.
+A schema is available at [docs/refs/ignis.schema.json](docs/refs/ignis.schema.json)
 
 You might use the `mts2ig` to convert a Mitsuba scene description to our own format. Keep in mind that this feature is very experimental and not all BSDFs work out of the box.
 
@@ -138,4 +146,4 @@ The Ignis client has an optional UI and multiple ways to interact with the scene
  - `Numpad 7` to switch to top view.
  - `Numpad 9` to look behind you.
  - `Numpad 2468` to rotate the camera.
- - Mouse to rotate the camera. `Shift` will move slower, `Strg/Ctrl` will move faster. Use with `Alt` to enable first person camera behaviour. 
+ - Use with `Strg/Ctrl` to rotate the camera around the center of the scene. Use with `Alt` to enable first person camera behaviour. 

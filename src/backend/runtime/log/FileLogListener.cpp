@@ -24,10 +24,10 @@ void FileLogListener::open(const std::string& file)
 
 void FileLogListener::startEntry(LogLevel level)
 {
-    time_t t  = time(0);
+    time_t t  = time(nullptr);
     clock_t c = clock();
 
-    struct tm ptm;
+    struct tm ptm{};
 #ifndef IG_OS_WINDOWS
     gmtime_r(&t, &ptm);
 #else
@@ -41,7 +41,7 @@ void FileLogListener::startEntry(LogLevel level)
             << Logger::levelString(level) << "] ";
 }
 
-void FileLogListener::writeEntry(int c)
+void FileLogListener::writeEntry(char c)
 {
     mStream.put(c);
 }

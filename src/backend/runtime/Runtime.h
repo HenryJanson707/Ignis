@@ -1,16 +1,22 @@
 #pragma once
 
-#include "DebugMode.h"
+#include "RuntimeStructs.h"
 #include "Statistics.h"
 #include "driver/DriverManager.h"
 #include "loader/Loader.h"
+#include "shader/ScriptPreprocessor.h"
 #include "table/SceneDatabase.h"
 
 namespace IG {
-class Camera;
+namespace Parser {
+class Scene;
+}
+
 struct LoaderOptions;
 
 struct RuntimeOptions {
+    bool IsTracer        = false;
+    bool IsInteractive   = false;
     bool DumpShader      = false;
     bool DumpShaderFull  = false;
     bool AcquireStats    = false;
@@ -22,87 +28,134 @@ struct RuntimeOptions {
     std::string OverrideTechnique;
     std::string OverrideCamera;
     std::pair<uint32, uint32> OverrideFilmSize = { 0, 0 };
-};
 
-struct RuntimeRenderSettings {
-    uint32 FilmWidth   = 800;
-    uint32 FilmHeight  = 600;
-    Vector3f CameraEye = Vector3f::Zero();
-    Vector3f CameraDir = Vector3f::UnitZ();
-    Vector3f CameraUp  = Vector3f::UnitY();
-    float FOV          = 60;
-    float TMin         = 0;
-    float TMax         = FltMax;
-};
-
-struct Ray {
-    Vector3f Origin;
-    Vector3f Direction;
-    Vector2f Range;
+    bool AddExtraEnvLight            = false;                           // User option to add a constant environment light (just to see something)
+    std::filesystem::path ModulePath = std::filesystem::current_path(); // Optional path to modules
+    std::filesystem::path ScriptDir  = {};                              // Path to a new script directory, replacing the internal standard library
 };
 
 class Runtime {
+    IG_CLASS_NON_COPYABLE(Runtime);
+    IG_CLASS_NON_MOVEABLE(Runtime);
+
 public:
-    Runtime(const std::filesystem::path& path, const RuntimeOptions& opts);
+    explicit Runtime(const RuntimeOptions& opts);
     ~Runtime();
 
-    void setup();
-    void step(const Camera& camera);
+    /// Load from file and initialize
+    bool loadFromFile(const std::filesystem::path& path);
+    /// Load from string and initialize
+    bool loadFromString(const std::string& str);
+
+    /// Do a single iteration in non-tracing mode
+    void step();
+    /// Do a single iteration in tracing mode
     void trace(const std::vector<Ray>& rays, std::vector<float>& data);
+    /// Reset internal counters etc. This should be used if data (like camera orientation) has changed. Frame counter will NOT be reset
     void reset();
 
-    const float* getFramebuffer(int aov = 0) const;
-    // aov<0 will clear all aovs
-    void clearFramebuffer(int aov = -1);
-    inline const std::vector<std::string> aovs() const { return mAOVs; }
+    /// A utility function to speed up tonemapping
+    /// out_pixels should be of size width*height!
+    void tonemap(uint32* out_pixels, const TonemapSettings& settings);
+    /// A utility function to speed up utility information from the image
+    void imageinfo(const ImageInfoSettings& settings, ImageInfoOutput& output);
 
-    inline uint32 currentTechniqueVariant() const { return mCurrentTechniqueVariant; }
-    inline uint32 currentIterationCount() const { return mCurrentIteration; }
-    inline uint32 currentIterationCountForFramebuffer() const { return mCurrentIterationFramebuffer; }
+    /// Will resize the framebuffer, clear it and reset rendering
+    void resizeFramebuffer(size_t width, size_t height);
+    /// Return pointer to framebuffer
+    const float* getFramebuffer(size_t aov = 0) const;
+    /// Will clear all framebuffers
+    void clearFramebuffer();
+    /// Will clear specific framebuffer
+    void clearFramebuffer(size_t aov);
 
+    /// Return all names of the enabled AOVs
+    inline const std::vector<std::string>& aovs() const { return mTechniqueInfo.EnabledAOVs; }
+
+    /// Return number of iterations rendered so far
+    inline size_t currentIterationCount() const { return mCurrentIteration; }
+    /// Return number of samples rendered so far
+    inline size_t currentSampleCount() const { return mCurrentSampleCount; }
+
+    /// Return pointer to structure containing statistics
     const Statistics* getStatistics() const;
 
-    inline const RuntimeRenderSettings& loadedRenderSettings() const { return mLoadedRenderSettings; }
+    /// Returns the name of the loaded technique
+    inline const std::string& technique() const { return mTechniqueName; }
 
-    inline DebugMode currentDebugMode() const { return mDebugMode; }
-    inline void setDebugMode(DebugMode mode) { mDebugMode = mode; }
-    inline bool isDebug() const { return mIsDebug; }
-    inline bool isTrace() const { return mIsTrace; }
+    /// Return true if the runtime is used in tracing mode
+    inline bool isTrace() const { return mOptions.IsTracer; }
 
+    /// The target the runtime is using
     inline Target target() const { return mTarget; }
-    inline size_t samplesPerIteration() const { return mSamplesPerIteration; }
 
+    /// Computes (approximative) number of samples per iteration. This might be off due to the internal computing of techniques
+    inline size_t samplesPerIteration() const { return mTechniqueInfo.ComputeSPI(0 /* TODO: Not always the best choice */, mSamplesPerIteration); }
+
+    /// The bounding box of the loaded scene
     inline const BoundingBox& sceneBoundingBox() const { return mDatabase.SceneBBox; }
 
-private:
-    void shutdown();
-    void compileShaders();
-    void handleTechniqueVariants(uint32 nextIteration);
+    /// Set integer parameter in the registry. Will replace already present values
+    void setParameter(const std::string& name, int value);
+    /// Set number parameter in the registry. Will replace already present values
+    void setParameter(const std::string& name, float value);
+    /// Set 3d vector parameter in the registry. Will replace already present values
+    void setParameter(const std::string& name, const Vector3f& value);
+    /// Set 4d vector parameter in the registry. Will replace already present values
+    void setParameter(const std::string& name, const Vector4f& value);
 
-    bool mInit;
+    /// The current framebuffer width
+    inline size_t framebufferWidth() const { return mFilmWidth; }
+    /// The current framebuffer height
+    inline size_t framebufferHeight() const { return mFilmHeight; }
+
+    /// The initial camera orientation the scene was loaded with. Can be used to reset in later iterations
+    inline CameraOrientation initialCameraOrientation() const { return mInitialCameraOrientation; }
+
+    /// Increase frame count (only used in interactive sessions)
+    inline void incFrameCount() { mCurrentFrame++; }
+
+    /// Get a list of all available techniques
+    static std::vector<std::string> getAvailableTechniqueTypes();
+
+    /// Get a list of all available cameras
+    static std::vector<std::string> getAvailableCameraTypes();
+
+private:
+    bool load(const std::filesystem::path& path, Parser::Scene&& scene);
+    bool setup();
+    void shutdown();
+    bool compileShaders();
+    void* compileShader(const std::string& src, const std::string& func, const std::string& name);
+    void stepVariant(size_t variant);
+    void traceVariant(const std::vector<Ray>& rays, size_t variant);
 
     const RuntimeOptions mOptions;
 
     SceneDatabase mDatabase;
-    RuntimeRenderSettings mLoadedRenderSettings;
     DriverInterface mLoadedInterface;
     DriverManager mManager;
+    ParameterSet mParameterSet;
+    ScriptPreprocessor mScriptPreprocessor;
 
     size_t mDevice;
     size_t mSamplesPerIteration;
     Target mTarget;
 
-    uint32 mCurrentIteration;
-    uint32 mCurrentIterationFramebuffer;
-    uint32 mCurrentTechniqueVariant;
+    size_t mCurrentIteration;
+    size_t mCurrentSampleCount;
+    size_t mCurrentFrame;
 
-    bool mIsTrace;
-    bool mIsDebug;
-    DebugMode mDebugMode;
+    size_t mFilmWidth;
+    size_t mFilmHeight;
+
+    CameraOrientation mInitialCameraOrientation;
+
     bool mAcquireStats;
-    std::vector<std::string> mAOVs;
 
-    TechniqueVariantSelector mTechniqueVariantSelector;
+    std::string mTechniqueName;
+    TechniqueInfo mTechniqueInfo;
+
     std::vector<TechniqueVariant> mTechniqueVariants;
     std::vector<TechniqueVariantShaderSet> mTechniqueVariantShaderSets; // Compiled shaders
 };

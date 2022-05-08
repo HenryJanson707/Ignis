@@ -9,14 +9,6 @@
 namespace IG {
 using namespace Parser;
 
-template <typename Derived>
-inline void writeMatrix(Serializer& serializer, const Eigen::MatrixBase<Derived>& m)
-{
-    for (int j = 0; j < m.cols(); ++j)
-        for (int i = 0; i < m.rows(); ++i)
-            serializer.write((float)m(i, j));
-}
-
 template <size_t N>
 inline static void setup_bvh(std::vector<EntityObject>& input, LoaderResult& result)
 {
@@ -64,28 +56,83 @@ bool LoaderEntity::load(LoaderContext& ctx, LoaderResult& result)
             continue;
         }
 
+        // Query medium interface
+        const std::string mediumInnerName = child->property("inner_medium").getString();
+        int mediumInner                   = -1;
+
+        if (!mediumInnerName.empty()) {
+            if (!ctx.Scene.medium(mediumInnerName)) {
+                IG_LOG(L_ERROR) << "Entity " << pair.first << " has unknown medium " << mediumInnerName << std::endl;
+                continue;
+            } else {
+                const auto it = ctx.Scene.media().find(mediumInnerName);
+                mediumInner   = (int)std::distance(ctx.Scene.media().begin(), it);
+            }
+        }
+
+        const std::string mediumOuterName = child->property("outer_medium").getString();
+        int mediumOuter                   = -1;
+
+        if (!mediumOuterName.empty()) {
+            if (!ctx.Scene.medium(mediumOuterName)) {
+                IG_LOG(L_ERROR) << "Entity " << pair.first << " has unknown medium " << mediumOuterName << std::endl;
+                continue;
+            } else {
+                const auto it = ctx.Scene.media().find(mediumOuterName);
+                mediumOuter   = (int)std::distance(ctx.Scene.media().begin(), it);
+            }
+        }
+
         // Extract entity information
         Transformf transform = child->property("transform").getTransform();
         transform.makeAffine();
 
+        const auto& shape = ctx.Environment.Shapes[shapeID];
+        if (shape.VertexCount == 0 || shape.FaceCount == 0)
+            continue; // No need to trigger a warning/error as this should have been done earlier
+
         const Transformf invTransform = transform.inverse();
-        const BoundingBox& shapeBox   = ctx.Environment.Shapes[shapeID].BoundingBox;
+        const BoundingBox& shapeBox   = shape.BoundingBox;
         const BoundingBox entityBox   = shapeBox.transformed(transform);
 
         // Extend scene box
         ctx.Environment.SceneBBox.extend(entityBox);
 
-        // Register name for lights to assosciate with
-        ctx.Environment.EntityIDs[pair.first] = ctx.Environment.Entities.size();
-        ctx.Environment.Entities.push_back({ transform, pair.first, shapeName, bsdfName });
+        // Register name for lights to associate with
+        uint32 materialID = 0;
+        if (ctx.Environment.AreaLightsMap.count(pair.first) > 0) {
+            ctx.Environment.EmissiveEntities.insert({ pair.first, Entity{ transform, pair.first, shapeName, bsdfName } });
+
+            // It is a unique material
+            materialID = (uint32)ctx.Environment.Materials.size();
+            ctx.Environment.Materials.push_back(Material{ bsdfName, mediumInner, mediumOuter, pair.first });
+        } else {
+            Material mat{ bsdfName, mediumInner, mediumOuter, {} };
+            auto it = std::find(ctx.Environment.Materials.begin(), ctx.Environment.Materials.end(), mat);
+            if (it == ctx.Environment.Materials.end()) {
+                materialID = (uint32)ctx.Environment.Materials.size();
+                ctx.Environment.Materials.push_back(mat);
+            } else {
+                materialID = (uint32)std::distance(ctx.Environment.Materials.begin(), it);
+            }
+        }
+
+        // Remember the entity to material
+        result.Database.EntityToMaterial.push_back(materialID);
+
+        const Eigen::Matrix<float, 3, 4> toLocal        = invTransform.matrix().block<3, 4>(0, 0);
+        const Eigen::Matrix<float, 3, 4> toGlobal       = transform.matrix().block<3, 4>(0, 0);
+        const Eigen::Matrix<float, 3, 3> toGlobalNormal = toGlobal.block<3, 3>(0, 0).inverse().transpose();
+        const float scaleFactor                         = std::abs(toGlobalNormal.determinant());
 
         // Write data to dyntable
         auto& entityData = result.Database.EntityTable.addLookup(0, 0, DefaultAlignment); // We do not make use of the typeid
         VectorSerializer entitySerializer(entityData, false);
-        writeMatrix(entitySerializer, invTransform.matrix().block<3, 4>(0, 0));                    // To Local
-        writeMatrix(entitySerializer, transform.matrix().block<3, 4>(0, 0));                       // To Global
-        writeMatrix(entitySerializer, transform.matrix().block<3, 3>(0, 0).transpose().inverse()); // To Global [Normal]
+        entitySerializer.write(toLocal, true);        // To Local
+        entitySerializer.write(toGlobal, true);       // To Global
+        entitySerializer.write(toGlobalNormal, true); // To Global [Normal]
         entitySerializer.write((uint32)shapeID);
+        entitySerializer.write(scaleFactor);
 
         // Extract information for BVH building
         EntityObject obj;
@@ -97,7 +144,8 @@ bool LoaderEntity::load(LoaderContext& ctx, LoaderResult& result)
 
     IG_LOG(L_DEBUG) << "Storing Entities took " << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start1).count() / 1000.0f << " seconds" << std::endl;
 
-    if (ctx.Environment.Entities.empty()) {
+    ctx.EntityCount = in_objs.size();
+    if (in_objs.empty()) {
         ctx.Environment.SceneDiameter = 0;
         return true;
     }

@@ -325,14 +325,13 @@ fn @cpu_hit_shade(entity_id: i32, primary: &PrimaryStream, secondary: &Secondary
             let ray_id  = primary2.rays.id(i);
             let pixel   = ray_id;
 
-            let local_ray = transform_norm_ray(ray, entity.local_mat);
-
-            let lcl_surf = shape.surface_element(local_ray, hit);
-            let glb_surf = map_surface_element(lcl_surf, entity.global_mat, entity.normal_mat);
+            let local_ray = transform_ray(ray, entity.local_mat);
+            let lcl_surf  = shape.surface_element(local_ray, hit);
+            let glb_surf  = map_surface_element(lcl_surf, entity.global_mat, entity.normal_mat);
             
             // Execute hit point shading, and add the contribution of each lane to the frame buffer
             let mat       = @shader(ray, hit, glb_surf);
-            let hit_color = if let Option[Color]::Some(color) = @on_hit(ray, pixel, hit, payload, glb_surf, mat) { color } else { black };
+            let hit_color = if let Option[Color]::Some(color) = @on_hit(ray, pixel, hit, payload, glb_surf, mat) { color } else { color_builtins::black };
             
             for lane in unroll(0, r_vector_width) {
                 let j = bitcast[i32](rv_extract(bitcast[f32](pixel), lane));
@@ -347,14 +346,24 @@ fn @cpu_hit_shade(entity_id: i32, primary: &PrimaryStream, secondary: &Secondary
             }
             
             // Compute shadow rays
-            if let Option[(Ray, Color)]::Some(new_ray, color) = @on_shadow(ray, pixel, hit, &mut rnd, payload, glb_surf, mat) {
-                write_secondary_ray(i, 0, new_ray);
-                secondary2.color_r(i) = color.r;
-                secondary2.color_g(i) = color.g;
-                secondary2.color_b(i) = color.b;
-                secondary2.rays.id(i) = ray_id;
-            } else {
-                secondary2.rays.id(i) = -1;
+            match @on_shadow(ray, pixel, hit, &mut rnd, payload, glb_surf, mat) {
+                ShadowRay::Simple(new_ray, color) => {
+                    write_secondary_ray(i, 0, new_ray);
+                    secondary2.color_r(i) = color.r;
+                    secondary2.color_g(i) = color.g;
+                    secondary2.color_b(i) = color.b;
+                    secondary2.rays.id(i) = ray_id;
+                },
+                ShadowRay::Advanced(new_ray, color, _/*TODO*/) => {
+                    write_secondary_ray(i, 0, new_ray);
+                    secondary2.color_r(i) = color.r;
+                    secondary2.color_g(i) = color.g;
+                    secondary2.color_b(i) = color.b;
+                    secondary2.rays.id(i) = ray_id;
+                },
+                _ => { /* None */
+                    secondary2.rays.id(i) = -1;
+                }
             }
 
             // Sample new rays
@@ -398,7 +407,7 @@ fn @cpu_miss_shade(primary: &PrimaryStream, path_tracer: Technique, accumulate: 
             let pixel   = ray_id;
 
             // Execute hit point shading, and add the contribution of each lane to the frame buffer
-            let hit_color = if let Option[Color]::Some(color) = @on_miss(ray, pixel, payload) { color } else { black };
+            let hit_color = if let Option[Color]::Some(color) = @on_miss(ray, pixel, payload) { color } else { color_builtins::black };
 
             for lane in unroll(0, r_vector_width) {
                 let j = bitcast[i32](rv_extract(bitcast[f32](pixel), lane));
@@ -512,7 +521,7 @@ fn @cpu_get_aov_image(id: i32, spp: i32) -> AOVImage {
         },
         get = @|pixel| -> Color {
             // TODO: Make sure this is correct
-            let mut color = black;
+            let mut color = color_builtins::black;
             for lane in unroll(0, rv_num_lanes()) {
                 let j = bitcast[i32](rv_extract(bitcast[f32](pixel), lane));
                 color.r = rv_insert(color.r, lane, ptr(j * 3 + 0));
@@ -558,216 +567,102 @@ fn @cpu_trace( scene: SceneGeometry
     let has_advanced_shadow   = ignis_use_advanced_shadow_handling();
     let is_framebuffer_locked = ignis_is_framebuffer_locked();
 
-    let mut primary_counter = 0:i64;
-    let mut bounces_counter = 0:i64;
-    let mut shadow_counter  = 0:i64;
-    let mut shading_counter = 0:i64;
-    let mut total_counter   = 0:i64;
-    let mut total_rays      = 0:i64;
     for xmin, ymin, xmax, ymax in cpu_parallel_tiles(work_width, work_height, tile_size, tile_size, num_cores) {
-        cpu_profile(&mut total_counter, || {
-            // Get ray streams/states from the CPU driver
-            let mut primary   : PrimaryStream;
-            let mut secondary : SecondaryStream;
-            let capacity = cpu_get_stream_capacity(spp, tile_size);
-            ignis_cpu_get_primary_stream(&mut primary,     capacity);
-            ignis_cpu_get_secondary_stream(&mut secondary, capacity);
+        ignis_register_thread();
+        
+        // Get ray streams/states from the CPU driver
+        let mut primary   : PrimaryStream;
+        let mut secondary : SecondaryStream;
+        let capacity = cpu_get_stream_capacity(spp, tile_size);
+        ignis_cpu_get_primary_stream(&mut primary,     capacity);
+        ignis_cpu_get_secondary_stream(&mut secondary, capacity);
 
-            let mut id = 0;
-            let num_rays = spp * (ymax - ymin) * (xmax - xmin);
-            while id < num_rays || primary.size > 0 {
-                let is_first = id == 0;
+        let mut id = 0;
+        let num_rays = spp * (ymax - ymin) * (xmax - xmin);
+        while id < num_rays || primary.size > 0 {
+            // (Re-)generate primary rays
+            if primary.size < capacity && id < num_rays {
+                let before_s = primary.size;
+                primary.size = pipeline.on_generate(&mut id, primary.size, xmin, ymin, xmax, ymax);
+                stats::add_quantity(stats::Quantity::CameraRayCount, primary.size - before_s);
+            }
 
-                // (Re-)generate primary rays
-                if primary.size < capacity && id < num_rays {
-                    primary.size = pipeline.on_generate(&mut id, primary.size, xmin, ymin, xmax, ymax);
+            if scene.info.num_entities == 0 {
+                pipeline.on_miss_shade(0, primary.size);
+                primary.size = 0;
+            } else {
+                // Trace primary rays
+                cpu_traverse_primary(scene, min_max, primary, single, vector_width);
+
+                // Sort hits by shader id, and filter invalid hits
+                let mut ray_ends : [i32 * 1024];
+                primary.size = cpu_sort_primary(primary, &mut ray_ends, scene.info.num_entities);
+
+                // Perform (vectorized) shading
+                let mut begin = 0;
+                for ent_id in range(0, scene.info.num_entities) {
+                    let end = ray_ends(ent_id);
+                    if begin < end {
+                        pipeline.on_hit_shade(ent_id, begin, end);
+                    }
+                    begin = end;
                 }
 
-                if scene.info.num_entities == 0 {
-                    pipeline.on_miss_shade(0, primary.size);
-                    primary.size = 0;
-                } else {
-                    // Trace primary rays
-                    cpu_profile(if is_first { &mut primary_counter } else { &mut bounces_counter }, || {
-                        cpu_traverse_primary(scene, min_max, primary, single, vector_width);
-                    });
-                    cpu_atomic_add_i64(&mut total_rays, primary.size as i64);
+                // Shade misses as well
+                let last = ray_ends(scene.info.num_entities);
+                if begin < last {
+                    pipeline.on_miss_shade(begin, last);
+                }
 
-                    // Sort hits by shader id, and filter invalid hits
-                    let mut ray_ends : [i32 * 1024];
-                    primary.size = cpu_sort_primary(primary, &mut ray_ends, scene.info.num_entities);
+                // Filter terminated rays
+                secondary.size = primary.size;
+                primary.size   = cpu_compact_primary(primary, vector_width, vector_compact);
+                stats::add_quantity(stats::Quantity::BounceRayCount, primary.size);
 
-                    // Perform (vectorized) shading
-                    cpu_profile(&mut shading_counter, || {
-                        let mut begin = 0;
-                        for ent_id in range(0, scene.info.num_entities) {
-                            let end = ray_ends(ent_id);
-                            if begin < end {
-                                pipeline.on_hit_shade(ent_id, begin, end);
-                            }
-                            begin = end;
-                        }
+                // Compact and trace secondary rays
+                secondary.size = cpu_compact_secondary(secondary, vector_width, vector_compact);
+                if likely(secondary.size > 0) {
+                    cpu_traverse_secondary(scene, min_max, secondary, single, vector_width);
+                    stats::add_quantity(stats::Quantity::ShadowRayCount, secondary.size);
+                }
 
-                        // Shade misses as well
-                        let last = ray_ends(scene.info.num_entities);
-                        if begin < last {
-                            pipeline.on_miss_shade(begin, last);
-                        }
-                    });
-
-                    // Filter terminated rays
-                    secondary.size = primary.size;
-                    primary.size   = cpu_compact_primary(primary, vector_width, vector_compact);
-
-                    // Compact and trace secondary rays
-                    secondary.size = cpu_compact_secondary(secondary, vector_width, vector_compact);
-                    if likely(secondary.size > 0) {
-                        cpu_profile(&mut shadow_counter, || {
-                            cpu_traverse_secondary(scene, min_max, secondary, single, vector_width);
-                        });
+                // Add the contribution for secondary rays to the frame buffer
+                if has_advanced_shadow {
+                    let hit_start = cpu_sort_secondary(secondary);
+                    if hit_start != 0 {
+                        // Call valids (miss)
+                        pipeline.on_advanced_shadow(0, hit_start, false);
                     }
 
-                    // Add the contribution for secondary rays to the frame buffer
-                    if has_advanced_shadow {
-                        let hit_start = cpu_sort_secondary(secondary);
-                        if hit_start != 0 {
-                            // Call valids (miss)
-                            pipeline.on_advanced_shadow(0, hit_start, false);
-                        }
-
-                        if hit_start < secondary.size {
-                            // Call invalids (hits)
-                            pipeline.on_advanced_shadow(hit_start, secondary.size, true);
-                        }
-                    } else {
-                        if !is_framebuffer_locked {    
-                            for i in range(0, secondary.size) {
-                                if secondary.prim_id(i) < 0 {
-                                    let j = secondary.rays.id(i);
-                                    accumulate(j,
-                                        make_color(
-                                            secondary.color_r(i),
-                                            secondary.color_g(i),
-                                            secondary.color_b(i),
-                                            1
-                                        )
-                                    );
-                                }
+                    if hit_start < secondary.size {
+                        // Call invalids (hits)
+                        pipeline.on_advanced_shadow(hit_start, secondary.size, true);
+                    }
+                } else {
+                    if !is_framebuffer_locked {    
+                        for i in range(0, secondary.size) {
+                            if secondary.prim_id(i) < 0 {
+                                let j = secondary.rays.id(i);
+                                accumulate(j,
+                                    make_color(
+                                        secondary.color_r(i),
+                                        secondary.color_g(i),
+                                        secondary.color_b(i),
+                                        1
+                                    )
+                                );
                             }
                         }
                     }
                 }
             }
-        });
-    }
-
-    if cpu_profiling_enabled {
-        fn @print_counter(counter: i64, name: &[u8]) -> () {
-            print_string(name);
-            print_string(": ");
-            print_i64(counter);
-            print_string(" (");
-            print_i64(counter * 100 / total_counter);
-            print_string("%)\n");
         }
-        let other_counter = total_counter - primary_counter - bounces_counter - shadow_counter - shading_counter;
-        print_counter(primary_counter, "primary");
-        print_counter(bounces_counter, "bounces");
-        print_counter(shadow_counter,  "shadow");
-        print_counter(shading_counter, "shade");
-        print_counter(other_counter,   "others");
-        print_counter(total_counter,   "total");
-        print_string("total rays: ");
-        print_i64(total_rays);
-        print_string("\n");
     }
 }
 
 // CPU device ----------------------------------------------------------------------
-fn @cpu_load_vec4(p: &[f32], elem: i32) {
-    let v = (p as &[simd[f32 * 4]])(elem);
-    make_vec4(v(0), v(1), v(2), v(3)) 
-}
-
-fn @make_cpu_buffer(p: &[u8], count: i32) = DeviceBuffer {
-    add_atomic_i32 = @ |i, v| cpu_atomic_add(&(p as &[i32])(i) as &mut i32, v),
-    load_i32_host  = @ |i| (p as &[i32])(i),
-    store_i32_host = @ |i, v| { (p as &mut [i32])(i) = v; },
-
-    load_f32    = @ |i| (p as &[f32])(i),
-    load_i32    = @ |i| (p as &[i32])(i),
-    load_vec2   = @ |i| { let q = p as &[f32]; make_vec2(q(i + 0), q(i + 1)) },
-    load_vec3   = @ |i| { let q = p as &[f32]; make_vec3(q(i + 0), q(i + 1), q(i + 2)) },
-    load_vec4   = @ |i| { let v = (&p(i * 4) as &[simd[f32 * 4]])(0); make_vec4(v(0), v(1), v(2), v(3)) },
-    load_int2   = @ |i| { let q = p as &[i32]; (q(i + 0), q(i + 1)) },
-    load_int3   = @ |i| { let q = p as &[i32]; (q(i + 0), q(i + 1), q(i + 2)) },
-    //load_int4   = @ |i| { let q = p as &[i32]; (q(i + 0), q(i + 1), q(i + 2), q(i + 3)) },
-    load_int4   = @ |i| { let v = ((&p(i * 4)) as &[simd[i32 * 4]])(0); (v(0), v(1), v(2), v(3)) },
-    load_mat3x3 = @ |i| { let q = p as &[f32]; 
-        make_mat3x3(make_vec3(q(i + 0), q(i + 1), q(i + 2)),
-                    make_vec3(q(i + 3), q(i + 4), q(i + 5)),
-                    make_vec3(q(i + 6), q(i + 7), q(i + 8))) },
-    load_mat3x4 = @ |i| {
-        let q  = &p(i * 4) as &[simd[f32 * 4]];
-        let v0 = q(0);
-        let v1 = q(1);
-        let v2 = q(2);
-        make_mat3x4(make_vec3(v0(0), v0(1), v0(2)),
-                    make_vec3(v0(3), v1(0), v1(1)),
-                    make_vec3(v1(2), v1(3), v2(0)),
-                    make_vec3(v2(1), v2(2), v2(3)))
-    },
-    load_mat4x4 = @ |i| {
-        let q  = &p(i * 4) as &[simd[f32 * 4]];
-        let v0 = q(0);
-        let v1 = q(1);
-        let v2 = q(2);
-        let v3 = q(3);
-        make_mat4x4(make_vec4(v0(0), v0(1), v0(2), v0(3)),
-                    make_vec4(v1(0), v1(1), v1(2), v1(3)),
-                    make_vec4(v2(0), v2(1), v2(2), v2(3)),
-                    make_vec4(v3(0), v3(1), v3(2), v3(3)))
-    },
-    store_i32     = @ |i, v| { (p as &mut [i32])(i) = v; },
-    store_f32     = @ |i, v| { (p as &mut [f32])(i) = v; },
-    store_vec2    = @ |i, v| { let q = p as &mut [f32]; q(i + 0) = v.x; q(i + 1) = v.y; },
-    store_vec3    = @ |i, v| { let q = p as &mut [f32]; q(i + 0) = v.x; q(i + 1) = v.y; q(i + 2) = v.z; },
-    store_vec4    = @ |i, v| { let q = p as &mut [f32]; q(i + 0) = v.x; q(i + 1) = v.y; q(i + 2) = v.z; q(i + 3) = v.w; },
-    store_int2    = @ |i, v1, v2|         { let q = p as &mut [i32]; q(i + 0) = v1; q(i + 1) = v2; },
-    store_int3    = @ |i, v1, v2, v3|     { let q = p as &mut [i32]; q(i + 0) = v1; q(i + 1) = v2; q(i + 2) = v3; },
-    store_int4    = @ |i, v1, v2, v3, v4| { let q = p as &mut [i32]; q(i + 0) = v1; q(i + 1) = v2; q(i + 2) = v3; q(i + 3) = v4; },
-    store_mat3x3  = @ |i, v| { 
-        let q = p as &mut [f32];
-        q(i + 0) = v.col(0).x; q(i + 1) = v.col(0).y; q(i + 2) = v.col(0).z;
-        q(i + 3) = v.col(1).x; q(i + 4) = v.col(1).y; q(i + 5) = v.col(1).z;
-        q(i + 6) = v.col(2).x; q(i + 7) = v.col(2).y; q(i + 8) = v.col(2).z;
-    },
-    store_mat3x4  = @ |i, v| { 
-        let q = p as &mut [f32];
-        q(i + 0) = v.col(0).x; q(i +  1) = v.col(0).y; q(i +  2) = v.col(0).z;
-        q(i + 3) = v.col(1).x; q(i +  4) = v.col(1).y; q(i +  5) = v.col(1).z;
-        q(i + 6) = v.col(2).x; q(i +  7) = v.col(2).y; q(i +  8) = v.col(2).z;
-        q(i + 9) = v.col(3).x; q(i + 10) = v.col(3).y; q(i + 11) = v.col(3).z;
-    },
-    store_mat4x4  = @ |i, v| { 
-        let q = p as &mut [f32];
-        q(i +  0) = v.col(0).x; q(i +  1) = v.col(0).y; q(i +  2) = v.col(0).z; q(i +  3) = v.col(0).w;
-        q(i +  4) = v.col(1).x; q(i +  5) = v.col(1).y; q(i +  6) = v.col(1).z; q(i +  7) = v.col(1).w;
-        q(i +  8) = v.col(2).x; q(i +  9) = v.col(2).y; q(i + 10) = v.col(2).z; q(i + 11) = v.col(2).w;
-        q(i + 12) = v.col(3).x; q(i + 13) = v.col(3).y; q(i + 14) = v.col(3).z; q(i + 15) = v.col(3).w;
-    },
-    count         = count,
-    has_alignment = false
-};
-
-fn @load_cpu_buffer(filename: &[u8]) {
-    let mut ptr      : &[u8];
-    let mut bytesize : i32;
-    ignis_load_buffer(0, filename, &mut ptr, &mut bytesize);
-    make_cpu_buffer(ptr, (bytesize as i64 / sizeof[i32]()) as i32)
-}
-
 fn @make_cpu_device(vector_compact: bool, single: bool, min_max: MinMax, vector_width: i32, num_cores: i32, tile_size: i32) = Device {
+    id    = 0,
     trace = @ |scene, pipeline, spp| {
         cpu_trace(
             scene,
@@ -802,10 +697,22 @@ fn @make_cpu_device(vector_compact: bool, single: bool, min_max: MinMax, vector_
             }
         }
     },
+    parallel_range_2d = @ |body| {
+        @|start_x, end_x, start_y, end_y| {
+            for xmin, ymin, xmax, ymax in cpu_parallel_tiles(end_x - start_x, end_y - start_y, tile_size, tile_size, num_cores) {
+                for x in range(xmin + start_x, xmax + start_x) {
+                    for y in range(ymin + start_y, ymax + start_y) {
+                        @ body(x,y)
+                    }   
+                }
+            }
+        }
+    },
     parallel_reduce_i32 = @|n, elem, op| cpu_reduce[i32](n, elem, op),
     parallel_reduce_f32 = @|n, elem, op| cpu_reduce[f32](n, elem, op),
+    get_device_buffer_accessor = @|| { @|ptr| make_cpu_buffer(ptr, 0) },
     load_scene_bvh = @ || {
-        if vector_width == 8 {
+        if vector_width >= 8 {
             let mut nodes: &[Node8];
             let mut objs: &[EntityLeaf1];
             ignis_load_bvh8_ent(0, &mut nodes, &mut objs);
@@ -826,13 +733,18 @@ fn @make_cpu_device(vector_compact: bool, single: bool, min_max: MinMax, vector_
     load_entity_table     = @ |dtb| make_entity_table(dtb, @|ptr| make_cpu_buffer(ptr, 0)),
     load_shape_table      = @ |dtb| make_shape_table(dtb, @|ptr| make_cpu_buffer(ptr, 0)),
     load_specific_shape   = @ |num_face, num_vert, num_norm, num_tex, off, dtb| load_specific_shape_from_table(num_face, num_vert, num_norm, num_tex, off, dtb, @|ptr| make_cpu_buffer(ptr, 0)),
+    load_custom_dyntable  = @ |name| -> DynTable {
+        let mut table: DynTable;
+        ignis_load_custom_dyntable(0, name, &mut table);
+        table
+    },
     load_bvh_table        = @ |dtb| -> BVHTable {
         @ |id| {
             let entry  = get_lookup_entry(id as u64,   dtb, @|ptr| make_cpu_buffer(ptr, 0)); 
             let header = get_table_entry(entry.offset, dtb, @|ptr| make_cpu_buffer(ptr, 0));
             let leaf_offset = header.load_i32(0) as u64;
     
-            if vector_width == 8 {
+            if vector_width >= 8 {
                 let nodes = get_table_ptr(entry.offset + 16 , dtb) as &[Node8];
                 let tris  = get_table_ptr(entry.offset + 16 + leaf_offset * (sizeof[Node8]() as u64), dtb) as &[Tri4];
                 make_cpu_bvh8_tri4(nodes, tris)
@@ -863,6 +775,19 @@ fn @make_cpu_device(vector_compact: bool, single: bool, min_max: MinMax, vector_
         let mut ptr : &[u8];
         ignis_request_buffer(0, name, &mut ptr, size * sizeof[i32]() as i32, flags);
         make_cpu_buffer(ptr, size)
+    },
+    make_buffer = @ |ptr, size| make_cpu_buffer(ptr, size),
+    dump_buffer = @ |id, filename| ignis_dbg_dump_buffer(0, id, filename),
+    request_debug_output = @|| {
+        if vector_width != 1 {
+            print_string("WARNING: There are issues with debug output and CPU vectorization. Use generic target instead!\n");
+        }
+
+        let mut ptr : &[u8];
+        let size = 4096;
+        ignis_request_buffer(0, "__dbg_output", &mut ptr, size * sizeof[i32]() as i32, 0);
+        let buffer = make_cpu_buffer(ptr, size);
+        make_debug_output(buffer)
     },
     get_film_size = @ | | {
         let mut film_pixels : &mut [f32];

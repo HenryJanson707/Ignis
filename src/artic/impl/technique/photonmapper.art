@@ -1,3 +1,5 @@
+// FIXME: Seems like there is a brightness bias somewhere
+
 struct Photon {
     in_dir:   Vec3,  // The direction this photon came from
     light:    i32,   // The associated light
@@ -55,7 +57,7 @@ fn @make_ppm_lightcache(device: Device, photon_count: i32, scene_bbox: BBox) -> 
             store_ppm_photon(photon, id, light_cache_buffer)
         },
         query = @ |pos, radius, body| -> Color {
-            if radius <= flt_eps || actual_photon_count == 0 { return(black) }
+            if radius <= flt_eps || actual_photon_count == 0 { return(color_builtins::black) }
 
             let radius2 = radius * radius;
             let (minx, miny, minz) = grid_scene_pos(vec3_sub(pos, make_vec3(radius, radius, radius)), scene_bbox);
@@ -64,11 +66,11 @@ fn @make_ppm_lightcache(device: Device, photon_count: i32, scene_bbox: BBox) -> 
             let query = @ |ix: i32, iy: i32, iz: i32| -> Color {
                 let lin_id = morton_3d(ix, iy, iz);
                 let count = count_buffer.load_i32(lin_id);
-                if count == 0 { return(black) }
+                if count == 0 { return(color_builtins::black) }
 
                 let offset = offset_buffer.load_i32(lin_id);
 
-                let mut contrib = black;
+                let mut contrib = color_builtins::black;
                 for i in range(offset, offset + count) {
                     let photon = load_ppm_photon(i, light_cache_buffer);
 
@@ -81,7 +83,7 @@ fn @make_ppm_lightcache(device: Device, photon_count: i32, scene_bbox: BBox) -> 
                 contrib
             };
 
-            let mut contrib = black;
+            let mut contrib = color_builtins::black;
             for iz in range(minz, maxz + 1) {
                 for iy in range(miny, maxy + 1) {
                     for ix in range(minx, maxx + 1) {
@@ -101,6 +103,7 @@ struct PPMRayPayload {
     depth:           i32,
     eta:             f32,
     radius_or_light: f32, // In the path tracer this becomes the primary radius, in LT the actual light index
+    path_type:       i32, // 0 -> non-delta, 1 -> delta
 }
 
 fn wrap_ppmraypayload(payload: PPMRayPayload) -> RayPayload {
@@ -111,6 +114,7 @@ fn wrap_ppmraypayload(payload: PPMRayPayload) -> RayPayload {
     r.components(3) = payload.depth as f32;    // FIXME: Weird behaviour. We have to use a cast instead of a bitcast, else it does not work...
     r.components(4) = payload.eta;
     r.components(5) = payload.radius_or_light;
+    r.components(6) = payload.path_type as f32;
     r
 }
 
@@ -119,12 +123,20 @@ fn unwrap_ppmraypayload(payload: RayPayload) = PPMRayPayload {
     depth           = payload.components(3) as i32,
     eta             = payload.components(4),
     radius_or_light = payload.components(5),
+    path_type       = payload.components(6) as i32,
 };
+
+fn init_ppm_raypayload() = wrap_ppmraypayload(PPMRayPayload { contrib = color_builtins::white, depth = 1, eta = 1, radius_or_light = 0, path_type = 1 });
 
 /////////////////////////////////////
 fn @make_ppm_light_emitter(num_lights: i32, lights: LightTable, iter: i32) -> RayEmitter {
     let offset : f32 = 0.001;
     let pdf_lightpick = if num_lights == 0 { 1 } else { 1 / (num_lights as f32) };
+
+    // Only partially evaluate if number of lights is reasonable
+    fn @(num_lights < 10) get_light(id : i32) -> Light {
+        @lights(id)
+    }
 
     @ |sample, x, y, _width, _height| {
         let mut hash = fnv_init();
@@ -134,8 +146,8 @@ fn @make_ppm_light_emitter(num_lights: i32, lights: LightTable, iter: i32) -> Ra
         hash = fnv_hash(hash, y as u32);
         let mut rnd = hash /*as RndState*/;
         
-        let light_id        = pick_light(&mut rnd, num_lights);
-        let light           = @lights(light_id);
+        let light_id        = pick_light_id(&mut rnd, num_lights);
+        let light           = get_light(light_id);
         let sample_emission = light.sample_emission;
         let light_sample    = @sample_emission(rnd);
         
@@ -149,6 +161,7 @@ fn @make_ppm_light_emitter(num_lights: i32, lights: LightTable, iter: i32) -> Ra
             depth           = 1,
             eta             = 1,
             radius_or_light = light_id as f32,
+            path_type       = 0 // Not used
         });
 
         (ray, rnd, payload)
@@ -211,6 +224,7 @@ fn @make_ppm_light_renderer(max_path_len: i32, _aovs: AOVTable, light_cache: Lig
                             depth           = pt.depth + 1,
                             eta             = pt.eta * mat_sample.eta,
                             radius_or_light = pt.radius_or_light,
+                            path_type       = pt.path_type, // Not used
                         })
                     ))
                 }
@@ -222,11 +236,11 @@ fn @make_ppm_light_renderer(max_path_len: i32, _aovs: AOVTable, light_cache: Lig
 
     Technique {
         on_hit         = on_hit,
-        on_miss        = @ |_, _, _| Option[Color]::None,
-        on_shadow      = @ |_, _, _, _, _, _, _| Option[(Ray, Color)]::None,
+        on_miss        = TechniqueNoMissFunction,
+        on_shadow      = TechniqueNoShadowFunction,
         on_bounce      = on_bounce,
-        on_shadow_hit  = @ |_, _, _| Option[(Color)]::None,
-        on_shadow_miss = @ |_, _, _| Option[Color]::None,
+        on_shadow_hit  = TechniqueNoShadowHitFunction,
+        on_shadow_miss = TechniqueNoShadowMissFunction,
     }
 }
 
@@ -237,17 +251,22 @@ static AOV_PPM_MERGING = 2;
 fn @ppm_compute_radius(max_radius: f32, iter: i32) -> f32 {
     let contract_ratio = 0.8:f32;
 
-    let pass       = iter / 2;
     let mut radius = max_radius;
-    for i in range(0, pass) {
+    for i in range(0, iter) {
         radius *= (i as f32 + 1 + contract_ratio) / (i + 2) as f32;
     }
 
     math_builtins::fmax(radius, 1e-5:f32)
 }
 
-fn @make_ppm_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, radius: f32, aovs: AOVTable, light_cache: LightCache) -> Technique {
+fn @make_ppm_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, radius: f32, aovs: AOVTable, clamp_value: f32, light_cache: LightCache) -> Technique {
     let offset : f32  = 0.001;
+
+    let handle_color = if clamp_value > 0 {
+        @|c: Color| color_saturate(c, clamp_value)
+    } else {
+        @|c: Color| c
+    };
 
     let aov_di      = @aovs(AOV_PPM_DIRECT);
     let aov_merging = @aovs(AOV_PPM_MERGING);
@@ -271,8 +290,8 @@ fn @make_ppm_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTabl
               ) -> Option[Color] {
         let pt = unwrap_ppmraypayload(payload);
 
-        // Hits on a light source
-        if pt.depth == 1 && mat.is_emissive && surf.is_entering {
+        // Hits on a light source (only accounted for if the path is specular so far)
+        if pt.path_type == 1 && mat.is_emissive && surf.is_entering {
             let out_dir = vec3_neg(ray.dir);
             let dot     = vec3_dot(out_dir, surf.local.col(2));
             if dot > flt_eps { // Only contribute proper aligned directions
@@ -280,7 +299,7 @@ fn @make_ppm_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTabl
                 let contrib = color_mul(pt.contrib, emit.intensity);
                 
                 aov_di.splat(pixel, contrib);
-                return(make_option(contrib))
+                return(make_option(handle_color(contrib)))
             }
         }
 
@@ -303,13 +322,13 @@ fn @make_ppm_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTabl
                             let photon_contrib = color_mulf(color_mul(photon.radiance, mat_contrib), kernel_f);
                             photon_contrib
                         } else {
-                            black
+                            color_builtins::black
                         }
                     } );
 
                 let contrib = color_mul(pt.contrib, color_divf(gather_contrib, light_cache.max_count as f32));
                 aov_merging.splat(pixel, contrib);
-                return(make_option(contrib))
+                return(make_option(handle_color(contrib)))
             }
         }
 
@@ -319,12 +338,12 @@ fn @make_ppm_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTabl
     fn @on_miss( ray: Ray
                , pixel: i32
                , payload: RayPayload) -> Option[Color] {
-        // To prevent double counting, only primary hits are accounted for
+        // To prevent double counting, only direct hits (with delta taken into account) are accounted for
         let pt = unwrap_ppmraypayload(payload);
-        if pt.depth != 1 { return(Option[Color]::None) }
+        if pt.path_type != 1 { return(Option[Color]::None) }
 
         let mut inflights = 0;
-        let mut color     = black;
+        let mut color     = color_builtins::black;
 
         // Due to the renderer design, this will only iterate through
         // infinite lights, as a miss shader does not contain area lights
@@ -342,7 +361,7 @@ fn @make_ppm_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTabl
 
         if inflights > 0 {
             aov_di.splat(pixel, color);
-            make_option(color)
+            make_option(handle_color(color))
         } else {
             Option[Color]::None
         }
@@ -374,7 +393,8 @@ fn @make_ppm_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTabl
                     contrib         = contrib,
                     depth           = pt.depth + 1,
                     eta             = pt.eta * mat_sample.eta,
-                    radius_or_light = get_radius(hit, pt)
+                    radius_or_light = get_radius(hit, pt),
+                    path_type       = if mat.bsdf.is_specular { pt.path_type } else { 0 }
                 })
             )
         } else {
@@ -385,10 +405,10 @@ fn @make_ppm_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTabl
     Technique {
         on_hit         = on_hit,
         on_miss        = on_miss,
-        on_shadow      = @ |_, _, _, _, _, _, _| Option[(Ray, Color)]::None,
+        on_shadow      = TechniqueNoShadowFunction,
         on_bounce      = on_bounce,
-        on_shadow_hit  = @ |_, _, _| Option[Color]::None,
-        on_shadow_miss = @ |_, _, _| Option[Color]::None,
+        on_shadow_hit  = TechniqueNoShadowHitFunction,
+        on_shadow_miss = TechniqueNoShadowMissFunction,
     }
 }
 

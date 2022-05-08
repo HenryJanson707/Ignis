@@ -13,8 +13,7 @@
 
 #include "glTFParser.h"
 
-namespace IG {
-namespace Parser {
+namespace IG::Parser {
 // TODO: (Re)Add arguments!
 
 using LookupPaths = std::vector<std::filesystem::path>;
@@ -71,10 +70,15 @@ inline static Vector2f getVector2f(const rapidjson::Value& obj)
     return Vector2f(array[0].GetFloat(), array[1].GetFloat());
 }
 
-inline static Vector3f getVector3f(const rapidjson::Value& obj)
+inline static Vector3f getVector3f(const rapidjson::Value& obj, bool allow2d = false)
 {
     const auto& array = obj.GetArray();
     const size_t len  = array.Size();
+    if (allow2d && len == 2) {
+        const Vector2f var = getVector2f(obj);
+        return Vector3f(var.x(), var.y(), 0);
+    }
+
     if (len != 3)
         throw std::runtime_error("Expected vector of length 3");
     if (!checkArrayIsAllNumber(array))
@@ -107,7 +111,7 @@ inline static Matrix3f getMatrix3f(const rapidjson::Value& obj)
     Matrix3f mat;
     for (size_t i = 0; i < 3; ++i)
         for (size_t j = 0; j < 3; ++j)
-            mat(i, j) = array[i * 3 + j].GetFloat();
+            mat(i, j) = array[rapidjson::SizeType(i * 3 + j)].GetFloat();
     return mat;
 }
 
@@ -124,7 +128,7 @@ inline static Matrix4f getMatrix4f(const rapidjson::Value& obj)
     Matrix4f mat = Matrix4f::Identity();
     for (size_t i = 0; i < rows; ++i)
         for (size_t j = 0; j < 4; ++j)
-            mat(i, j) = array[i * 4 + j].GetFloat();
+            mat(i, j) = array[rapidjson::SizeType(i * 4 + j)].GetFloat();
     return mat;
 }
 
@@ -160,8 +164,8 @@ Eigen::Matrix<typename Derived1::Scalar, 3, 4> lookAt(const Eigen::MatrixBase<De
                                                       const Eigen::MatrixBase<Derived2>& center,
                                                       const Eigen::MatrixBase<Derived3>& up)
 {
-    typedef Eigen::Matrix<typename Derived1::Scalar, 3, 1> Vector3;
-    typedef Eigen::Matrix<typename Derived1::Scalar, 3, 4> Matrix34;
+    using Vector3  = Eigen::Matrix<typename Derived1::Scalar, 3, 1>;
+    using Matrix34 = Eigen::Matrix<typename Derived1::Scalar, 3, 4>;
 
     Vector3 f = (center - eye).normalized();
     if (f.squaredNorm() <= FltEps)
@@ -200,17 +204,17 @@ inline static void populateObject(std::shared_ptr<Object>& ptr, const rapidjson:
                 // From left to right. The last entry will be applied first to a potential point A1*A2*A3*...*An*p
                 for (auto val = itr->value.MemberBegin(); val != itr->value.MemberEnd(); ++val) {
                     if (val->name == "translate") {
-                        const Vector3f pos = getVector3f(val->value);
+                        const Vector3f pos = getVector3f(val->value, true);
                         transform.translate(pos);
                     } else if (val->name == "scale") {
                         if (val->value.IsNumber()) {
                             transform.scale(val->value.GetFloat());
                         } else {
-                            const Vector3f s = getVector3f(val->value);
+                            const Vector3f s = getVector3f(val->value, true);
                             transform.scale(s);
                         }
                     } else if (val->name == "rotate") { // [Rotation around X, Rotation around Y, Rotation around Z] all in degrees
-                        const Vector3f angles = getVector3f(val->value);
+                        const Vector3f angles = getVector3f(val->value, true);
                         transform *= Eigen::AngleAxisf(Deg2Rad * angles(0), Vector3f::UnitX())
                                      * Eigen::AngleAxisf(Deg2Rad * angles(1), Vector3f::UnitY())
                                      * Eigen::AngleAxisf(Deg2Rad * angles(2), Vector3f::UnitZ());
@@ -318,6 +322,9 @@ static void handleNamedObject(Scene& scene, ObjectType type, const std::filesyst
     case OT_LIGHT:
         scene.addLight(name, ptr);
         break;
+    case OT_MEDIUM:
+        scene.addMedium(name, ptr);
+        break;
     case OT_ENTITY:
         scene.addEntity(name, ptr);
         break;
@@ -335,9 +342,7 @@ static void handleExternalObject(SceneParser& loader, Scene& scene, const std::f
     if (!obj.HasMember("filename"))
         throw std::runtime_error("Expected a path for externals");
 
-    std::string pluginType = obj.HasMember("type") ? getString(obj["type"]) : "ignis";
-    std::transform(pluginType.begin(), pluginType.end(), pluginType.begin(), ::tolower);
-
+    const std::string pluginType     = obj.HasMember("type") ? to_lowercase(getString(obj["type"])) : "ignis";
     const std::string inc_path       = getString(obj["filename"]);
     const std::filesystem::path path = std::filesystem::canonical(resolvePath(inc_path, baseDir, loader.lookupPaths()));
     if (path.empty())
@@ -374,6 +379,8 @@ void Scene::addFrom(const Scene& other)
         addBSDF(bsdf.first, bsdf.second);
     for (const auto& light : other.lights())
         addLight(light.first, light.second);
+    for (const auto& medium : other.media())
+        addLight(medium.first, medium.second);
     for (const auto& shape : other.shapes())
         addShape(shape.first, shape.second);
     for (const auto& ent : other.entities())
@@ -388,6 +395,15 @@ void Scene::addFrom(const Scene& other)
 
     if (!mFilm)
         mFilm = other.mFilm;
+}
+
+void Scene::addConstantEnvLight()
+{
+    if (mLights.count("__env") == 0) {
+        auto env = std::make_shared<Object>(OT_LIGHT, "constant", std::filesystem::path{});
+        env->setProperty("radiance", Property::fromNumber(InvPi));
+        addLight("__env", env);
+    }
 }
 
 class InternalSceneParser {
@@ -459,6 +475,16 @@ public:
             }
         }
 
+        if (doc.HasMember("media")) {
+            if (!doc["media"].IsArray())
+                throw std::runtime_error("Expected lights element to be an array");
+            for (const auto& medium : doc["media"].GetArray()) {
+                if (!medium.IsObject())
+                    throw std::runtime_error("Expected medium element to be an object");
+                handleNamedObject(scene, OT_MEDIUM, baseDir, medium);
+            }
+        }
+
         if (doc.HasMember("entities")) {
             if (!doc["entities"].IsArray())
                 throw std::runtime_error("Expected entities element to be an array");
@@ -481,18 +507,15 @@ Scene SceneParser::loadFromFile(const std::filesystem::path& path, bool& ok)
         // Load gltf directly
         Scene scene = glTFSceneParser::loadFromFile(path, ok);
         if (ok) {
-            bool hasEnv = false;
-            for (const auto& light : scene.lights()) {
-                if (light.second->pluginType() != "area" && light.second->pluginType() != "point") {
-                    hasEnv = true;
-                    break;
-                }
+            // Scene is using volumes, switch to the volpath technique
+            if (!scene.media().empty()) {
+                scene.setTechnique(std::make_shared<Object>(OT_TECHNIQUE, "volpath", path.parent_path()));
             }
 
-            if (!hasEnv) {
-                auto env = std::make_shared<Object>(OT_LIGHT, "constant", path.parent_path());
-                env->setProperty("radiance", Property::fromNumber(InvPi));
-                scene.addLight("__env", env);
+            // Add light to the scene if no light is available (preview style)
+            if (scene.lights().empty()) {
+                IG_LOG(L_WARNING) << "No lights available in " << path << ". Adding default environment light" << std::endl;
+                scene.addConstantEnvLight();
             }
         }
         return scene;
@@ -515,7 +538,8 @@ Scene SceneParser::loadFromFile(const std::filesystem::path& path, bool& ok)
         return Scene();
     }
 
-    return InternalSceneParser::loadFromJSON(*this, std::filesystem::canonical(path.parent_path()), doc);
+    const std::filesystem::path parent = path.has_parent_path() ? std::filesystem::canonical(path.parent_path()) : std::filesystem::path{};
+    return InternalSceneParser::loadFromJSON(*this, parent, doc);
 }
 
 Scene SceneParser::loadFromString(const char* str, bool& ok)
@@ -541,5 +565,4 @@ Scene SceneParser::loadFromString(const char* str, size_t max_len, bool& ok)
     ok = true;
     return InternalSceneParser::loadFromJSON(*this, "", doc);
 }
-} // namespace Parser
-} // namespace IG
+} // namespace IG::Parser

@@ -9,6 +9,7 @@
 
 #include "serialization/VectorSerializer.h"
 
+#include <algorithm>
 #include <chrono>
 #include <sstream>
 
@@ -18,34 +19,11 @@
 // Does not improve much, as it is IO bounded
 #define IG_PARALLEL_LOAD_SHAPE
 // There is no reason to not build multiple BVHs in parallel
-//#define IG_PARALLEL_BVH
+#define IG_PARALLEL_BVH
 
 namespace IG {
 
 using namespace Parser;
-
-struct TransformCache {
-    Matrix4f TransformMatrix;
-    Matrix3f NormalMatrix;
-
-    TransformCache(const Transformf& t)
-    {
-        TransformMatrix = t.matrix();
-        NormalMatrix    = TransformMatrix.block<3, 3>(0, 0).transpose().inverse();
-    }
-
-    inline Vector3f applyTransform(const Vector3f& v) const
-    {
-        Vector4f w = TransformMatrix * Vector4f(v(0), v(1), v(2), 1.0f);
-        w /= w(3);
-        return Vector3f(w(0), w(1), w(2));
-    }
-
-    inline Vector3f applyNormal(const Vector3f& n) const
-    {
-        return (NormalMatrix * n).normalized();
-    }
-};
 
 inline TriMesh setup_mesh_triangle(const Object& elem)
 {
@@ -80,13 +58,21 @@ inline TriMesh setup_mesh_cube(const Object& elem)
     return TriMesh::MakeBox(origin, Vector3f::UnitX() * width, Vector3f::UnitY() * height, Vector3f::UnitZ() * depth);
 }
 
-inline TriMesh setup_mesh_sphere(const Object& elem)
+inline TriMesh setup_mesh_ico_sphere(const Object& elem)
+{
+    const Vector3f center     = elem.property("center").getVector3();
+    const float radius        = elem.property("radius").getNumber(1.0f);
+    const uint32 subdivisions = elem.property("subdivisions").getInteger(4);
+    return TriMesh::MakeIcoSphere(center, radius, subdivisions);
+}
+
+inline TriMesh setup_mesh_uv_sphere(const Object& elem)
 {
     const Vector3f center = elem.property("center").getVector3();
     const float radius    = elem.property("radius").getNumber(1.0f);
     const uint32 stacks   = elem.property("stacks").getInteger(32);
     const uint32 slices   = elem.property("slices").getInteger(16);
-    return TriMesh::MakeSphere(center, radius, stacks, slices);
+    return TriMesh::MakeUVSphere(center, radius, stacks, slices);
 }
 
 inline TriMesh setup_mesh_cylinder(const Object& elem)
@@ -96,8 +82,8 @@ inline TriMesh setup_mesh_cylinder(const Object& elem)
     const uint32 sections     = elem.property("sections").getInteger(32);
     const bool filled         = elem.property("filled").getBool(true);
 
-    float baseRadius;
-    float tipRadius;
+    float baseRadius = 0;
+    float tipRadius  = 0;
     if (elem.properties().count("radius") != 0) {
         baseRadius = elem.property("radius").getNumber(1.0f);
         tipRadius  = baseRadius;
@@ -220,10 +206,11 @@ bool LoaderShape::load(LoaderContext& ctx, LoaderResult& result)
 {
     // To make use of parallelization and workaround the map restrictions
     // we do have to construct a map
-    std::vector<std::string_view> ids;
-    ids.reserve(ctx.Scene.shapes().size());
-    for (const auto& pair : ctx.Scene.shapes())
-        ids.push_back(pair.first);
+    std::vector<std::string> ids(ctx.Scene.shapes().size());
+    std::transform(ctx.Scene.shapes().begin(), ctx.Scene.shapes().end(), ids.begin(),
+                   [](const std::pair<std::string, std::shared_ptr<Object>>& pair) {
+                       return pair.first;
+                   });
 
     // Preallocate mesh storage
     std::vector<TriMesh> meshes;
@@ -234,7 +221,7 @@ bool LoaderShape::load(LoaderContext& ctx, LoaderResult& result)
     // Load meshes in parallel
     // This is not always useful as the bottleneck is provably the IO, but better trying...
     const auto load_mesh = [&](size_t i) {
-        const std::string name = std::string(ids.at(i));
+        const std::string name = ids.at(i);
         const auto child       = ctx.Scene.shape(name);
 
         TriMesh& mesh = meshes[i];
@@ -244,8 +231,10 @@ bool LoaderShape::load(LoaderContext& ctx, LoaderResult& result)
             mesh = setup_mesh_rectangle(*child);
         } else if (child->pluginType() == "cube" || child->pluginType() == "box") {
             mesh = setup_mesh_cube(*child);
-        } else if (child->pluginType() == "sphere") {
-            mesh = setup_mesh_sphere(*child);
+        } else if (child->pluginType() == "sphere" || child->pluginType() == "icosphere") {
+            mesh = setup_mesh_ico_sphere(*child);
+        } else if (child->pluginType() == "uvsphere") {
+            mesh = setup_mesh_uv_sphere(*child);
         } else if (child->pluginType() == "cylinder") {
             mesh = setup_mesh_cylinder(*child);
         } else if (child->pluginType() == "cone") {
@@ -259,12 +248,17 @@ bool LoaderShape::load(LoaderContext& ctx, LoaderResult& result)
         } else if (child->pluginType() == "mitsuba") {
             mesh = setup_mesh_mitsuba(name, *child, ctx);
         } else {
-            IG_LOG(L_WARNING) << "Shape '" << name << "': Can not load shape type '" << child->pluginType() << "'" << std::endl;
+            IG_LOG(L_ERROR) << "Shape '" << name << "': Can not load shape type '" << child->pluginType() << "'" << std::endl;
             return;
         }
 
         if (mesh.vertices.empty()) {
-            IG_LOG(L_WARNING) << "Shape '" << name << "': While loading shape type '" << child->pluginType() << "' no vertices were generated" << std::endl;
+            IG_LOG(L_ERROR) << "Shape '" << name << "': While loading shape type '" << child->pluginType() << "' no vertices were generated" << std::endl;
+            return;
+        }
+
+        if (mesh.faceCount() == 0) {
+            IG_LOG(L_ERROR) << "Shape '" << name << "': While loading shape type '" << child->pluginType() << "' no indices were generated" << std::endl;
             return;
         }
 
@@ -274,15 +268,8 @@ bool LoaderShape::load(LoaderContext& ctx, LoaderResult& result)
         if (child->property("face_normals").getBool())
             mesh.setupFaceNormalsAsVertexNormals();
 
-        TransformCache transform = TransformCache(child->property("transform").getTransform());
-        if (!transform.TransformMatrix.isIdentity()) {
-            for (size_t i = 0; i < mesh.vertices.size(); ++i)
-                mesh.vertices[i] = transform.applyTransform(mesh.vertices[i]);
-            for (size_t i = 0; i < mesh.normals.size(); ++i)
-                mesh.normals[i] = transform.applyNormal(mesh.normals[i]);
-            for (size_t i = 0; i < mesh.face_normals.size(); ++i)
-                mesh.face_normals[i] = transform.applyNormal(mesh.face_normals[i]);
-        }
+        if (!child->property("transform").getTransform().matrix().isIdentity())
+            mesh.transform(child->property("transform").getTransform());
 
         // Build bounding box
         BoundingBox& bbox = boxes[i];
@@ -323,7 +310,7 @@ bool LoaderShape::load(LoaderContext& ctx, LoaderResult& result)
         shape.FaceCount   = mesh.faceCount();
         shape.BoundingBox = boxes.at(id);
 
-        const uint32 shapeID = ctx.Environment.Shapes.size();
+        const uint32 shapeID = (uint32)ctx.Environment.Shapes.size();
         ctx.Environment.Shapes.push_back(shape);
         ctx.Environment.ShapeIDs[pair.first] = shapeID;
 

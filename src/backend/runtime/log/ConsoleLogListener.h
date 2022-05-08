@@ -7,10 +7,10 @@ namespace IG {
 class ConsoleLogListener : public LogListener {
 public:
     ConsoleLogListener(bool useAnsi = true);
-    virtual ~ConsoleLogListener();
+    virtual ~ConsoleLogListener() = default;
 
     virtual void startEntry(LogLevel level) override;
-    virtual void writeEntry(int c) override;
+    virtual void writeEntry(char c) override;
 
     inline void enableAnsi(bool b = true) { mUseAnsi = b; }
     inline bool isUsingAnsi() const { return mUseAnsi; }

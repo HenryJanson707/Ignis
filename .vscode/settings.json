@@ -4,8 +4,8 @@
         "*.artpp": "rust",
         "*.nvvm": "llvm",
         "*.llvm": "llvm",
-        "*.impala": "rust",
         "*.art": "rust",
+        "*.impala": "rust",
         "cctype": "cpp",
         "clocale": "cpp",
         "cmath": "cpp",
@@ -130,8 +130,12 @@
         "cfloat": "cpp",
         "ciso646": "cpp",
         "climits": "cpp",
-        "span": "cpp"
+        "span": "cpp",
+        "any": "cpp",
+        "charconv": "cpp",
+        "numbers": "cpp",
+        "semaphore": "cpp"
     },
     "cmake.configureOnOpen": false,
-    "cmake.buildDirectory": "${workspaceRoot}/build/${buildType}",
+    "cmake.buildDirectory": "${workspaceFolder}/build/${buildType}",
 }

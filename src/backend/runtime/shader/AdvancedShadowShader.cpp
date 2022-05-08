@@ -1,7 +1,9 @@
 #include "AdvancedShadowShader.h"
 #include "Logger.h"
 #include "loader/Loader.h"
+#include "loader/LoaderCamera.h"
 #include "loader/LoaderLight.h"
+#include "loader/LoaderMedium.h"
 #include "loader/LoaderTechnique.h"
 #include "loader/ShaderUtils.h"
 #include "loader/ShadingTree.h"
@@ -32,6 +34,13 @@ std::string AdvancedShadowShader::setup(bool is_hit, LoaderContext& ctx)
         stream << LoaderLight::generate(tree, !requireAreaLight)
                << std::endl;
     }
+
+    if (ctx.CurrentTechniqueVariantInfo().UsesMedia)
+        stream << LoaderMedium::generate(tree) << std::endl;
+
+    // Include camera if necessary
+    if (ctx.CurrentTechniqueVariantInfo().RequiresExplicitCamera)
+        stream << LoaderCamera::generate(ctx) << std::endl;
 
     stream << "  let spp = " << ctx.SamplesPerIteration << " : i32;" << std::endl;
 

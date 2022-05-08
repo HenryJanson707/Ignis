@@ -14,7 +14,7 @@ static_assert(sizeof(StVector2f) == sizeof(float) * 2, "Expected storage vector 
 
 struct TriMesh {
     std::vector<StVector3f> vertices;
-    std::vector<uint32> indices; // A triangle is based as [i0,i1,i2,m] with m = Material
+    std::vector<uint32> indices; // A triangle is based as [i0,i1,i2,0]
     std::vector<StVector3f> normals;
     std::vector<StVector3f> face_normals;
     std::vector<float> face_inv_area;
@@ -24,17 +24,22 @@ struct TriMesh {
 
     void fixNormals(bool* hasBadNormals = nullptr);
     void flipNormals();
-    void scale(float scale);
-    void mergeFrom(const TriMesh& src);
-    void replaceID(uint32 m_idx);
 
-    void computeFaceAreaOnly(bool* hasBadAreas = nullptr);
+    // Remove all triangles with zero area. Will return number of triangles removed
+    size_t removeZeroAreaTriangles();
+
     void computeFaceNormals(bool* hasBadAreas = nullptr);
     void computeVertexNormals();
     void makeTexCoordsZero();
     void setupFaceNormalsAsVertexNormals();
 
-    static TriMesh MakeSphere(const Vector3f& center, float radius, uint32 stacks, uint32 slices);
+    void transform(const Transformf& t);
+
+    /// Returns true if the given mesh can be approximated as a plane
+    bool isAPlane() const;
+
+    static TriMesh MakeUVSphere(const Vector3f& center, float radius, uint32 stacks, uint32 slices);
+    static TriMesh MakeIcoSphere(const Vector3f& center, float radius, uint32 subdivisions);
     static TriMesh MakeDisk(const Vector3f& center, const Vector3f& normal, float radius, uint32 sections);
     static TriMesh MakePlane(const Vector3f& origin, const Vector3f& xAxis, const Vector3f& yAxis);
     static TriMesh MakeTriangle(const Vector3f& p0, const Vector3f& p1, const Vector3f& p2);

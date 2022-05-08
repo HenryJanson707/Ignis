@@ -2,8 +2,7 @@ BSDFs
 =====
 
 This section contains a list of bsdfs supported by the Ignis renderer.
-All number and color parameters can be connected to a texture by referencing it via its name.
-If only a channel of the texture is desired, the expression :monosp:`id.channel` can be used, with :monosp:`channel` being r, g or b respectively.
+All number and color parameters can be connected to a shading network or texture via :ref:`PExpr <PExpr>`.
 
 A bsdf is specified in the :monosp:`bsdfs` block with a :monosp:`name` and a :monosp:`type`.
 The type has to be one of the bsdfs listed at this section below.
@@ -55,9 +54,14 @@ Rough diffuse (:monosp:`roughdiffuse`)
    - 0.5
    - Albedo
 
+ * - alpha
+   - |number|
+   - 0
+   - Isotropic roughness.
+
 .. subfigstart::
 
-.. figure::  images/mat_rough_diffuse.jpg
+.. figure::  images/mat_roughdiffuse.jpg
   :width: 90%
   :align: center
   
@@ -129,8 +133,22 @@ Rough dielectric (:monosp:`roughdielectric`)
    - |number|
    - 1.00027, 1.55
    - TODO
+ * - alpha_u, alpha_v
+   - |number|
+   - 0.1, 0.1
+   - Roughness terms. Can be specified isotropically with just `alpha` as well. 
 
-.. WARNING:: The :monosp:`roughdielectric` is currently not implemented and will fallback to :monosp:`dielectric`
+.. subfigstart::
+
+.. figure::  images/mat_roughdielectric.jpg
+  :width: 90%
+  :align: center
+  
+  Rough dielectric
+
+.. subfigend::
+  :width: 0.6
+  :label: fig-rough-dielectric
 
 .. _bsdf-mirror:
 
@@ -164,8 +182,8 @@ Smooth conductor (:monosp:`conductor`)
 .. objectparameters::
 
  * - eta, k
-   - |number|
-   - none
+   - |color|
+   - ~ Gold
    - Real and imaginary components of the material's index of refraction.
  * - specular_reflectance
    - |color|
@@ -179,7 +197,7 @@ Smooth conductor (:monosp:`conductor`)
   :width: 90%
   :align: center
   
-  Conductor
+  Gold conductor
 
 .. subfigend::
   :width: 0.6
@@ -193,22 +211,26 @@ Rough conductor (:monosp:`roughconductor`)
 .. objectparameters::
 
  * - eta, k
-   - |number|
-   - none
+   - |color|
+   - ~ Gold
    - Real and imaginary components of the material's index of refraction.
  * - specular_reflectance
    - |color|
    - 1.0
    - Optional factor that can be used to modulate the specular reflection component.
      Note that for physical realism, this parameter should never be touched. 
-     
+ * - alpha_u, alpha_v
+   - |number|
+   - 0.1, 0.1
+   - Roughness terms. Can be specified isotropically with just `alpha` as well.
+   
 .. subfigstart::
 
-.. figure::  images/mat_rough_conductor.jpg
+.. figure::  images/mat_roughconductor.jpg
   :width: 90%
   :align: center
   
-  Rough conductor
+  Rough gold conductor
 
 .. subfigend::
   :width: 0.6
@@ -265,10 +287,14 @@ Rough plastic (:monosp:`roughplastic`)
    - |number|
    - 1.00027, 1.55
    - TODO
+ * - alpha_u, alpha_v
+   - |number|
+   - 0.1, 0.1
+   - Roughness terms. Can be specified isotropically with just `alpha` as well. 
 
 .. subfigstart::
 
-.. figure::  images/mat_rough_plastic.jpg
+.. figure::  images/mat_roughplastic.jpg
   :width: 90%
   :align: center
   
@@ -306,7 +332,7 @@ Phong (:monosp:`phong`)
   :width: 0.6
   :label: fig-phong
 
-.. NOTE:: We do not recommend to use this bsdf for new projects, as it disregards energy conversation or other PBR principles
+.. NOTE:: It is not recommended to use this bsdf for new projects as it disregards some PBR principles and is only included for legacy purposes.
 
 .. _bsdf-principled:
 
@@ -317,21 +343,9 @@ Disney *Principled* (:monosp:`principled`)
 
  * - base_color
    - |color|
-   - 1.0
-   - TODO
- * - flatness
-   - |number|
-   - 0.0
+   - 0.8
    - TODO
  * - metallic
-   - |number|
-   - 0.0
-   - TODO
- * - ior
-   - |number|
-   - 1.55
-   - TODO
- * - specular_tint
    - |number|
    - 0.0
    - TODO
@@ -340,6 +354,26 @@ Disney *Principled* (:monosp:`principled`)
    - 0.5
    - TODO
  * - anisotropic
+   - |number|
+   - 0.0
+   - TODO
+ * - ior
+   - |number|
+   - 1.55
+   - TODO
+ * - thin
+   - |bool|
+   - false
+   - TODO
+ * - flatness
+   - |number|
+   - 0.0
+   - TODO
+ * - specular_transmission
+   - |number|
+   - 0.0
+   - TODO
+ * - specular_tint
    - |number|
    - 0.0
    - TODO
@@ -359,30 +393,18 @@ Disney *Principled* (:monosp:`principled`)
    - |number|
    - 0.0
    - TODO
- * - spec_trans
+ * - clearcoat_roughness
    - |number|
-   - 0.0
+   - 0.1
    - TODO
- * - relative_ior
-   - |number|
-   - 1.1
-   - TODO
- * - scatter_distance
-   - |number|
-   - 0.5
-   - TODO
- * - diff_trans
-   - |number|
-   - 0.0
-   - TODO
- * - transmittance
+ * - diffuse_transmission
    - |number|
    - 0.0
    - TODO
 
 .. subfigstart::
 
-.. figure::  images/mat_disney.jpg
+.. figure::  images/mat_principled.jpg
   :width: 90%
   :align: center
   
@@ -391,8 +413,6 @@ Disney *Principled* (:monosp:`principled`)
 .. subfigend::
   :width: 0.6
   :label: fig-principled
-
-.. WARNING:: The :monosp:`principled` bsdf is still experimental
 
 .. _bsdf-blend:
 
@@ -403,7 +423,7 @@ Blend (:monosp:`blend`)
 
  * - first, second
    - |bsdf|
-   - None
+   - *None*
    - TODO
  * - weight
    - |number|
@@ -431,11 +451,15 @@ Mask (:monosp:`mask`)
 
  * - bsdf
    - |bsdf|
-   - None
+   - *None*
    - TODO
  * - weight
    - |number|
    - 0.5
+   - TODO
+ * - inverted
+   - |bool|
+   - false
    - TODO
 
 .. subfigstart::
@@ -449,6 +473,42 @@ Mask (:monosp:`mask`)
 .. subfigend::
   :width: 0.6
   :label: fig-mask
+
+.. _bsdf-cutoff:
+
+Cutoff (:monosp:`cutoff`)
+-------------------------
+
+.. objectparameters::
+
+ * - bsdf
+   - |bsdf|
+   - *None*
+   - TODO
+ * - weight
+   - |number|
+   - 0.5
+   - TODO
+ * - cutoff
+   - |number|
+   - 0.5
+   - TODO
+ * - inverted
+   - |bool|
+   - false
+   - TODO
+
+.. subfigstart::
+
+.. figure::  images/mat_cutoff.jpg
+  :width: 90%
+  :align: center
+  
+  Cutoff with a uniform weight
+
+.. subfigend::
+  :width: 0.6
+  :label: fig-cutoff
 
 .. _bsdf-passthrough:
 
@@ -467,4 +527,112 @@ Passthrough (:monosp:`passthrough`)
   :width: 0.6
   :label: fig-passthrough
 
-.. NOTE:: The :monosp:`passthrough` bsdf should be used carefully, as simple techniques like Next-Event Estimation still see the object geometry
+.. NOTE:: The :monosp:`passthrough` bsdf should be used carefully, as simple techniques like Next-Event Estimation still see the object geometry.
+
+.. _bsdf-normalmap:
+
+Normal mapping (:monosp:`normalmap`)
+------------------------------------
+
+.. objectparameters::
+
+ * - bsdf
+   - |bsdf|
+   - *None*
+   - TODO
+ * - map
+   - |color|
+   - 1
+   - Usually a texture used for normal mapping.
+ * - strength
+   - |number|
+   - 1
+   - TODO
+
+.. subfigstart::
+
+.. figure::  images/mat_normalmap.jpg
+  :width: 90%
+  :align: center
+  
+  Normal mapping
+
+.. subfigend::
+  :width: 0.6
+  :label: fig-normalmap
+
+.. _bsdf-bumpmap:
+
+Bump mapping (:monosp:`bumpmap`)
+--------------------------------
+
+.. objectparameters::
+
+ * - bsdf
+   - |bsdf|
+   - *None*
+   - TODO
+ * - map
+   - |texture|
+   - *None*
+   - A grayscale texture used for texture mapping.
+ * - strength
+   - |number|
+   - 1
+   - TODO
+
+.. subfigstart::
+
+.. figure::  images/mat_bumpmap.jpg
+  :width: 90%
+  :align: center
+  
+  Bump mapping
+
+.. subfigend::
+  :width: 0.6
+  :label: fig-bumpmap
+
+.. _bsdf-klems:
+
+Klems (:monosp:`klems`)
+-----------------------
+
+.. objectparameters::
+
+ * - filename
+   - |string|
+   - *None*
+   - Path to a valid windows xml specifying a klems bsdf.
+ * - base_color
+   - |color|
+   - 1
+   - Tint.
+ * - up
+   - |vector|
+   - (0, 0, 1)
+   - Up vector
+
+.. NOTE:: The :monosp:`klems` bsdf is still experimental.
+
+.. _bsdf-tensortree:
+
+TensorTree (:monosp:`tensortree`)
+---------------------------------
+
+.. objectparameters::
+
+ * - filename
+   - |string|
+   - *None*
+   - Path to a valid windows xml specifying a tensortree bsdf.
+ * - base_color
+   - |color|
+   - 1
+   - Tint.
+ * - up
+   - |vector|
+   - (0, 0, 1)
+   - Up vector
+
+.. NOTE:: The :monosp:`tensortree` bsdf is still experimental.

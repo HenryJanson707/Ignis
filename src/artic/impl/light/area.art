@@ -1,4 +1,11 @@
-fn @make_area_light(area: AreaEmitter, color_f: fn (Vec2) -> Color) = Light {
+// Surface that emits light
+struct AreaEmitter {
+    sample: fn (Vec2) -> (Vec3, Vec3, Vec2, f32),
+    normal: fn (Vec2) -> Vec3,
+    pdf:    fn (Vec2) -> f32
+}
+
+fn @make_area_light(area: AreaEmitter, color_f: Texture) = Light {
     sample_direct = @ |rnd, from_surf| {
         let (pos, n, coords, area_pdf) = area.sample(make_vec2(randf(rnd), randf(rnd)));
         let dir = vec3_sub(from_surf.point, pos);
@@ -23,19 +30,20 @@ fn @make_shape_area_emitter(entity: Entity, shape: Shape) -> AreaEmitter {
             let f   = ux as i32;
             let uv2 = make_vec2(ux - (f as f32), uv.y);
             let (i0, i1, i2) = mesh.triangles(f);
-            let v0  = mesh.vertices(i0);
-            let v1  = mesh.vertices(i1);
-            let v2  = mesh.vertices(i2);
-            let t0  = mesh.tex_coords(i0);
-            let t1  = mesh.tex_coords(i1);
-            let t2  = mesh.tex_coords(i2);
-            let n   = mesh.face_normals(f);
+            let v0   = mat3x4_transform_point(entity.global_mat, mesh.vertices(i0));
+            let v1   = mat3x4_transform_point(entity.global_mat, mesh.vertices(i1));
+            let v2   = mat3x4_transform_point(entity.global_mat, mesh.vertices(i2));
+            let t0   = mesh.tex_coords(i0);
+            let t1   = mesh.tex_coords(i1);
+            let t2   = mesh.tex_coords(i2);
+            let area = 0.5 * vec3_len(vec3_cross(vec3_sub(v1, v0), vec3_sub(v2, v0)));
+            let n    = vec3_normalize(mat3x3_mul(entity.normal_mat, mesh.face_normals(f))); // TODO: Maybe use face normal based on orientation
             let (u, v) = sample_triangle(uv2.x, uv2.y);
-            let inv_area = mesh.face_inv_area(f);
-            (mat3x4_transform_point(entity.global_mat, vec3_lerp2(v0, v1, v2, u, v)),
-             vec3_normalize(mat3x3_mul(entity.normal_mat, n)),
+            
+            (vec3_lerp2(v0, v1, v2, u, v),
+             n,
              vec2_lerp2(t0, t1, t2, u, v),
-             inv_area / (mesh.num_tris as f32))
+             1 / (area * mesh.num_tris as f32))
         },
         normal = @ |uv| {
             let f = (uv.x * (mesh.num_tris as f32)) as i32;
@@ -43,7 +51,39 @@ fn @make_shape_area_emitter(entity: Entity, shape: Shape) -> AreaEmitter {
         },
         pdf = @ |uv| {
             let f = (uv.x * (mesh.num_tris as f32)) as i32;
-            mesh.face_inv_area(f) / (mesh.num_tris as f32)
+            let (i0, i1, i2) = mesh.triangles(f);
+            let v0   = mat3x4_transform_point(entity.global_mat, mesh.vertices(i0));
+            let v1   = mat3x4_transform_point(entity.global_mat, mesh.vertices(i1));
+            let v2   = mat3x4_transform_point(entity.global_mat, mesh.vertices(i2));
+            let area = 0.5 * vec3_len(vec3_cross(vec3_sub(v1, v0), vec3_sub(v2, v0)));
+            1 / (area * mesh.num_tris as f32)
         }
     }
+}
+
+fn @load_simple_area_lights(device: Device, shapes: ShapeTable) -> LightTable {
+    let tbl = device.load_custom_dyntable("SimpleArea");
+    let acc = device.get_device_buffer_accessor();
+
+    let elem_s = 40 * sizeof[f32]() as u64; // See LoaderLight.cpp:exportSimpleAreaLights (with padding/alignment included)
+    @ |id| {
+        //let entry = get_lookup_entry(id as u64, tbl); // No need as we have only one type!
+        let data = get_table_entry(elem_s * (id as u64), tbl, acc);
+
+        let local_mat  = data.load_mat3x4(0);
+        let global_mat = data.load_mat3x4(12);
+        let m          = data.load_mat3x4(24); // This is faster due to aligned loading instructions
+        let entity     = Entity {
+            local_mat  = local_mat,
+            global_mat = global_mat,
+            normal_mat = make_mat3x3(m.col(0),m.col(1),m.col(2)),
+            shape_id   = bitcast[i32](m.col(3).x),
+            scale      = m.col(3).y
+        };
+
+        let shape    = shapes(entity.shape_id);
+        let radiance = data.load_vec3(36);
+
+        make_area_light(make_shape_area_emitter(entity, shape), @|_| vec3_to_color(radiance))
+    } 
 }

@@ -1,7 +1,7 @@
 Welcome to Ignis's documentation!
 =================================
 
-.. image:: screenshot.jpg
+.. image:: screenshot.jpeg
     :alt: Screenshot of the Ignis frontend `igview`.
     :width: 50%
     :align: center
@@ -18,7 +18,7 @@ Table of Contents:
    :caption: Getting Started:
    
    src/getting_started/start
-   src/getting_started/compiling
+   src/getting_started/building
    src/getting_started/tutorials/index.rst
 
 .. toctree::
@@ -26,10 +26,12 @@ Table of Contents:
    :caption: Scene reference
 
    src/scene/file_format
+   src/scene/pexpr
    src/scene/externals
    src/scene/shapes
    src/scene/entities
    src/scene/bsdfs
+   src/scene/media
    src/scene/lights
    src/scene/textures
    src/scene/cameras

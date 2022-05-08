@@ -25,18 +25,27 @@
 #[import(cc = "C")] fn ignis_load_rays(i32, &mut &[StreamRay]) -> ();
 #[import(cc = "C")] fn ignis_load_scene(i32, &mut SceneDatabase) -> ();
 #[import(cc = "C")] fn ignis_load_scene_info(i32, &mut SceneInfo) -> ();
+#[import(cc = "C")] fn ignis_load_custom_dyntable(i32, &[u8], &mut DynTable) -> ();
 #[import(cc = "C")] fn ignis_load_image(i32, &[u8], &mut &[f32], &mut i32, &mut i32) -> ();
 #[import(cc = "C")] fn ignis_load_buffer(i32, &[u8], &mut &[u8], &mut i32) -> ();
 #[import(cc = "C")] fn ignis_request_buffer(i32, &[u8], &mut &[u8], i32, i32) -> ();
 #[import(cc = "C")] fn ignis_present(i32) -> ();
 
+#[import(cc = "C")] fn ignis_dbg_dump_buffer(i32, &[u8], &[u8]) -> ();
+#[import(cc = "C")] fn ignis_flush_debug_output(i32, &[u8], i32) -> ();
+
+#[import(cc = "C")] fn ignis_register_thread() -> ();
+
 #[import(cc = "C")] fn ignis_use_advanced_shadow_handling() -> bool;
 #[import(cc = "C")] fn ignis_is_framebuffer_locked() -> bool;
 
-//#[import(cc = "C")] fn ignis_handle_primary_trace(i32, &mut PrimaryStream) -> ();
-//#[import(cc = "C")] fn ignis_handle_secondary_trace(i32, &mut SecondaryStream) -> ();
 #[import(cc = "C")] fn ignis_handle_miss_shader(i32, i32) -> ();
 #[import(cc = "C")] fn ignis_handle_hit_shader(i32, i32, i32) -> ();
 #[import(cc = "C")] fn ignis_handle_ray_generation(&mut i32, i32, i32, i32, i32, i32) -> i32;
 #[import(cc = "C")] fn ignis_handle_advanced_shadow_shader(i32, i32, bool) -> ();
 #[import(cc = "C")] fn ignis_handle_callback_shader(i32) -> ();
+
+#[import(cc = "C")] fn ignis_get_parameter_i32(&[u8], i32) -> i32;
+#[import(cc = "C")] fn ignis_get_parameter_f32(&[u8], f32) -> f32;
+#[import(cc = "C")] fn ignis_get_parameter_vector(&[u8], f32, f32, f32, &mut f32, &mut f32, &mut f32) -> ();
+#[import(cc = "C")] fn ignis_get_parameter_color(&[u8], f32, f32, f32, f32, &mut f32, &mut f32, &mut f32, &mut f32) -> ();

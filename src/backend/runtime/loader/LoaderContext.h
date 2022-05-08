@@ -40,7 +40,9 @@ struct LoaderContext {
     std::string TechniqueType;
     IG::TechniqueInfo TechniqueInfo;
 
-    uint32 CurrentTechniqueVariant;
+    bool IsTracer = false;
+
+    size_t CurrentTechniqueVariant;
     inline const IG::TechniqueVariantInfo CurrentTechniqueVariantInfo() const { return TechniqueInfo.Variants[CurrentTechniqueVariant]; }
 
     std::unordered_map<std::string, uint32> TextureBuffer; // Texture to Buffer/Image, used only in workaround
@@ -49,10 +51,24 @@ struct LoaderContext {
     LoaderEnvironment Environment;
     SceneDatabase* Database = nullptr;
 
+    size_t EntityCount;
+
+    // The width & height while loading. This might change in the actual rendering
+    size_t FilmWidth  = 800;
+    size_t FilmHeight = 600;
+
     std::filesystem::path handlePath(const std::filesystem::path& path, const Parser::Object& obj) const;
 
     Vector3f extractColor(const Parser::Object& obj, const std::string& propname, const Vector3f& def = Vector3f::Ones()) const;
     float extractIOR(const Parser::Object& obj, const std::string& propname, float def = 1.55f) const;
+
+    bool HasError = false;
+
+    /// Use this function to mark the loading process as failed
+    inline void signalError()
+    {
+        HasError = true;
+    }
 };
 
 } // namespace IG

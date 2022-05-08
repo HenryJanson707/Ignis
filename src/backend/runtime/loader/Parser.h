@@ -7,8 +7,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace IG {
-namespace Parser {
+namespace IG::Parser {
 // --------------- Enums
 enum ObjectType {
     OT_BSDF = 0,
@@ -16,6 +15,7 @@ enum ObjectType {
     OT_ENTITY,
     OT_FILM,
     OT_LIGHT,
+    OT_MEDIUM,
     OT_SHAPE,
     OT_TECHNIQUE,
     OT_TEXTURE,
@@ -52,6 +52,7 @@ public:
 
     inline PropertyType type() const { return mType; }
     inline bool isValid() const { return mType != PT_NONE; }
+    inline bool canBeNumber() const { return mType == PT_NUMBER || mType == PT_INTEGER; }
 
     inline Number getNumber(Number def = Number(0), bool* ok = nullptr, bool exact = false) const
     {
@@ -62,7 +63,7 @@ public:
         } else if (!exact && mType == PT_INTEGER) {
             if (ok)
                 *ok = true;
-            return mInteger;
+            return static_cast<Number>(mInteger);
         } else {
             if (ok)
                 *ok = false;
@@ -249,9 +250,9 @@ public:
     inline Property operator[](const std::string& key) const { return property(key); }
 
 private:
-    const ObjectType mType;
-    const std::string mPluginType;
-    const std::filesystem::path mBaseDir;
+    ObjectType mType;
+    std::string mPluginType;
+    std::filesystem::path mBaseDir;
     std::unordered_map<std::string, Property> mProperties;
 };
 
@@ -281,22 +282,27 @@ public:
     inline const auto& bsdfs() const { return mBSDFs; }
     inline const auto& shapes() const { return mShapes; }
     inline const auto& lights() const { return mLights; }
+    inline const auto& media() const { return mMedia; }
     inline const auto& entities() const { return mEntities; }
 
     inline std::shared_ptr<Object> texture(const std::string& name) const { return mTextures.count(name) > 0 ? mTextures.at(name) : nullptr; }
     inline std::shared_ptr<Object> bsdf(const std::string& name) const { return mBSDFs.count(name) > 0 ? mBSDFs.at(name) : nullptr; }
     inline std::shared_ptr<Object> shape(const std::string& name) const { return mShapes.count(name) > 0 ? mShapes.at(name) : nullptr; }
     inline std::shared_ptr<Object> light(const std::string& name) const { return mLights.count(name) > 0 ? mLights.at(name) : nullptr; }
+    inline std::shared_ptr<Object> medium(const std::string& name) const { return mMedia.count(name) > 0 ? mMedia.at(name) : nullptr; }
     inline std::shared_ptr<Object> entity(const std::string& name) const { return mEntities.count(name) > 0 ? mEntities.at(name) : nullptr; }
 
     inline void addTexture(const std::string& name, const std::shared_ptr<Object>& texture) { mTextures[name] = texture; }
     inline void addBSDF(const std::string& name, const std::shared_ptr<Object>& bsdf) { mBSDFs[name] = bsdf; }
     inline void addShape(const std::string& name, const std::shared_ptr<Object>& shape) { mShapes[name] = shape; }
     inline void addLight(const std::string& name, const std::shared_ptr<Object>& light) { mLights[name] = light; }
+    inline void addMedium(const std::string& name, const std::shared_ptr<Object>& medium) { mMedia[name] = medium; }
     inline void addEntity(const std::string& name, const std::shared_ptr<Object>& entity) { mEntities[name] = entity; }
 
     // Add all information from other to this scene, except technique, film and camera information
     void addFrom(const Scene& other);
+
+    void addConstantEnvLight();
 
 private:
     std::shared_ptr<Object> mTechnique;
@@ -307,6 +313,7 @@ private:
     std::unordered_map<std::string, std::shared_ptr<Object>> mBSDFs;
     std::unordered_map<std::string, std::shared_ptr<Object>> mShapes;
     std::unordered_map<std::string, std::shared_ptr<Object>> mLights;
+    std::unordered_map<std::string, std::shared_ptr<Object>> mMedia;
     std::unordered_map<std::string, std::shared_ptr<Object>> mEntities;
 };
 
@@ -349,5 +356,4 @@ private:
     std::vector<std::filesystem::path> mLookupPaths;
     std::unordered_map<std::string, std::string> mArguments;
 };
-} // namespace Parser
-} // namespace IG
+} // namespace IG::Parser

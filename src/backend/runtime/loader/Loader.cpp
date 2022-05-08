@@ -1,5 +1,6 @@
 #include "Loader.h"
 #include "LoaderBSDF.h"
+#include "LoaderCamera.h"
 #include "LoaderEntity.h"
 #include "LoaderLight.h"
 #include "LoaderShape.h"
@@ -15,8 +16,6 @@
 namespace IG {
 bool Loader::load(const LoaderOptions& opts, LoaderResult& result)
 {
-    const auto start1 = std::chrono::high_resolution_clock::now();
-
     LoaderContext ctx;
     ctx.FilePath            = opts.FilePath;
     ctx.Target              = opts.Target;
@@ -25,6 +24,11 @@ bool Loader::load(const LoaderOptions& opts, LoaderResult& result)
     ctx.CameraType          = opts.CameraType;
     ctx.TechniqueType       = opts.TechniqueType;
     ctx.SamplesPerIteration = opts.SamplesPerIteration;
+    ctx.IsTracer            = opts.IsTracer;
+    ctx.FilmWidth           = opts.FilmWidth;
+    ctx.FilmHeight          = opts.FilmHeight;
+
+    LoaderLight::setupAreaLights(ctx);
 
     // Load content
     if (!LoaderShape::load(ctx, result))
@@ -32,6 +36,13 @@ bool Loader::load(const LoaderOptions& opts, LoaderResult& result)
 
     if (!LoaderEntity::load(ctx, result))
         return false;
+
+    LoaderCamera::setupInitialOrientation(ctx, result);
+
+    IG_LOG(L_DEBUG) << "Got " << ctx.Environment.Materials.size() << " unique materials" << std::endl;
+    IG_LOG(L_DEBUG) << "Got " << ctx.Environment.AreaLightsMap.size() << " unique area lights" << std::endl;
+
+    result.Database.MaterialCount = ctx.Environment.Materials.size();
 
     ctx.Database      = &result.Database;
     ctx.TechniqueInfo = LoaderTechnique::getInfo(ctx);
@@ -41,36 +52,37 @@ bool Loader::load(const LoaderOptions& opts, LoaderResult& result)
         return false;
     }
 
-    LoaderLight::setupAreaLights(ctx);
-
     result.TechniqueVariants.resize(ctx.TechniqueInfo.Variants.size());
     for (size_t i = 0; i < ctx.TechniqueInfo.Variants.size(); ++i) {
         auto& variant               = result.TechniqueVariants[i];
         const auto& info            = ctx.TechniqueInfo.Variants[i];
         ctx.CurrentTechniqueVariant = i;
-
-        variant.Width           = info.OverrideWidth;
-        variant.Height          = info.OverrideHeight;
-        variant.LockFramebuffer = info.LockFramebuffer;
+        ctx.SamplesPerIteration     = info.GetSPI(opts.SamplesPerIteration);
 
         // Generate Ray Generation Shader
         if (info.OverrideCameraGenerator)
             variant.RayGenerationShader = info.OverrideCameraGenerator(ctx);
         else
             variant.RayGenerationShader = RayGenerationShader::setup(ctx);
-        if (variant.RayGenerationShader.empty())
+        if (variant.RayGenerationShader.empty()) {
+            IG_LOG(L_ERROR) << "Constructed empty ray generation shader." << std::endl;
             return false;
+        }
 
         // Generate Miss Shader
         variant.MissShader = MissShader::setup(ctx);
-        if (variant.MissShader.empty())
+        if (variant.MissShader.empty()) {
+            IG_LOG(L_ERROR) << "Constructed empty miss shader." << std::endl;
             return false;
+        }
 
         // Generate Hit Shader
-        for (size_t i = 0; i < result.Database.EntityTable.entryCount(); ++i) {
-            std::string shader = HitShader::setup(i, ctx);
-            if (shader.empty())
+        for (size_t j = 0; j < ctx.Environment.Materials.size(); ++j) {
+            std::string shader = HitShader::setup(j, ctx);
+            if (shader.empty()) {
+                IG_LOG(L_ERROR) << "Constructed empty hit shader for material " << j << "." << std::endl;
                 return false;
+            }
             variant.HitShaders.push_back(shader);
         }
 
@@ -80,19 +92,26 @@ bool Loader::load(const LoaderOptions& opts, LoaderResult& result)
             variant.AdvancedShadowMissShader = AdvancedShadowShader::setup(false, ctx);
         }
 
-        for (size_t i = 0; i < info.CallbackGenerators.size(); ++i) {
-            if (info.CallbackGenerators[i] != nullptr)
-                variant.CallbackShaders[i] = info.CallbackGenerators[i](ctx);
+        for (size_t j = 0; j < info.CallbackGenerators.size(); ++j) {
+            if (info.CallbackGenerators.at(j) != nullptr)
+                variant.CallbackShaders[j] = info.CallbackGenerators.at(j)(ctx);
         }
     }
 
     result.Database.SceneRadius = ctx.Environment.SceneDiameter / 2.0f;
     result.Database.SceneBBox   = ctx.Environment.SceneBBox;
-    result.AOVs                 = ctx.TechniqueInfo.EnabledAOVs;
-    result.VariantSelector      = ctx.TechniqueInfo.VariantSelector;
+    result.TechniqueInfo        = ctx.TechniqueInfo;
 
-    IG_LOG(L_DEBUG) << "Loading scene took " << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start1).count() / 1000.0f << " seconds" << std::endl;
+    return !ctx.HasError;
+}
 
-    return true;
+std::vector<std::string> Loader::getAvailableTechniqueTypes()
+{
+    return LoaderTechnique::getAvailableTypes();
+}
+
+std::vector<std::string> Loader::getAvailableCameraTypes()
+{
+    return LoaderCamera::getAvailableTypes();
 }
 } // namespace IG

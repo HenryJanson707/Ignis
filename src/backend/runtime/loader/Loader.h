@@ -1,8 +1,9 @@
 #pragma once
 
+#include "CameraOrientation.h"
 #include "Parser.h"
 #include "Target.h"
-#include "TechniqueVariant.h"
+#include "TechniqueInfo.h"
 #include "table/SceneDatabase.h"
 
 namespace IG {
@@ -14,19 +15,27 @@ struct LoaderOptions {
     IG::Target Target;
     std::string CameraType;
     std::string TechniqueType;
-    size_t SamplesPerIteration;
+    size_t FilmWidth;
+    size_t FilmHeight;
+    size_t SamplesPerIteration; // Only a recommendation!
+    bool IsTracer;
 };
 
 struct LoaderResult {
     SceneDatabase Database;
-    std::vector<std::string> AOVs;
-
     std::vector<TechniqueVariant> TechniqueVariants;
-    TechniqueVariantSelector VariantSelector;
+    IG::TechniqueInfo TechniqueInfo;
+    IG::CameraOrientation CameraOrientation;
 };
 
 class Loader {
 public:
     static bool load(const LoaderOptions& opts, LoaderResult& result);
+
+    /// Get a list of all available techniques
+    static std::vector<std::string> getAvailableTechniqueTypes();
+
+    /// Get a list of all available cameras
+    static std::vector<std::string> getAvailableCameraTypes();
 };
 } // namespace IG

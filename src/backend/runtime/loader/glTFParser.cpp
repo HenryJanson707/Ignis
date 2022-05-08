@@ -2,6 +2,7 @@
 #include "ImageIO.h"
 #include "Logger.h"
 
+#include <string_view>
 #include <unordered_set>
 
 #include <rapidjson/document.h>
@@ -19,8 +20,21 @@
 #define TINYGLTF_IMPLEMENTATION
 #include "tiny_gltf.h"
 
-namespace IG {
-namespace Parser {
+constexpr std::string_view KHR_lights_punctual             = "KHR_lights_punctual";
+constexpr std::string_view KHR_materials_clearcoat         = "KHR_materials_clearcoat";
+constexpr std::string_view KHR_materials_emissive_strength = "KHR_materials_emissive_strength";
+constexpr std::string_view KHR_materials_ior               = "KHR_materials_ior";
+constexpr std::string_view KHR_materials_sheen             = "KHR_materials_sheen";
+constexpr std::string_view KHR_materials_translucency      = "KHR_materials_translucency";
+constexpr std::string_view KHR_materials_transmission      = "KHR_materials_transmission";
+constexpr std::string_view KHR_materials_unlit             = "KHR_materials_unlit";
+constexpr std::string_view KHR_materials_volume            = "KHR_materials_volume";
+constexpr std::string_view KHR_texture_transform           = "KHR_texture_transform";
+
+// Uncomment this to map unlit materials to area lights. This can explode shading complexity and is therefore not really recommended
+// #define IG_GLTF_MAP_UNLIT_AS_LIGHT
+
+namespace IG::Parser {
 static bool imageLoader(tinygltf::Image* img, const int, std::string*,
                         std::string*, int, int,
                         const unsigned char* ptr, int size, void*)
@@ -33,7 +47,24 @@ static bool imageLoader(tinygltf::Image* img, const int, std::string*,
     return true;
 }
 
-static std::filesystem::path exportImage(const tinygltf::Image& img, const tinygltf::Model& model, int id, const std::filesystem::path& dir)
+inline void findAndReplaceAll(std::string& data, const std::string_view& toSearch, const std::string_view& replaceStr)
+{
+    size_t pos = data.find(toSearch);
+    while (pos != std::string::npos) {
+        data.replace(pos, toSearch.size(), replaceStr);
+        pos = data.find(toSearch, pos + replaceStr.size());
+    }
+}
+
+inline std::string handleURI(const std::string& uri)
+{
+    std::string new_uri = uri;
+    findAndReplaceAll(new_uri, "%20", " ");
+    return new_uri;
+}
+
+static std::filesystem::path exportImage(const tinygltf::Image& img, const tinygltf::Model& model, int id,
+                                         const std::filesystem::path& cache_dir, const std::filesystem::path& in_dir)
 {
     if (img.bufferView >= 0) {
         const tinygltf::BufferView& view = model.bufferViews[img.bufferView];
@@ -41,7 +72,7 @@ static std::filesystem::path exportImage(const tinygltf::Image& img, const tinyg
 
         std::string extension = "." + tinygltf::MimeToExt(img.mimeType);
 
-        std::filesystem::path path = dir / ("_img_" + std::to_string(id) + extension);
+        std::filesystem::path path = cache_dir / ("_img_" + std::to_string(id) + extension);
         std::ofstream out(path.generic_u8string(), std::ios::binary);
         out.write(reinterpret_cast<const char*>(buffer.data.data() + view.byteOffset), view.byteLength);
 
@@ -49,13 +80,17 @@ static std::filesystem::path exportImage(const tinygltf::Image& img, const tinyg
     } else if (!img.image.empty()) {
         std::string extension = "." + tinygltf::MimeToExt(img.mimeType);
 
-        std::filesystem::path path = dir / ("_img_" + std::to_string(id) + extension);
+        std::filesystem::path path = cache_dir / ("_img_" + std::to_string(id) + extension);
         std::ofstream out(path.generic_u8string(), std::ios::binary);
         out.write(reinterpret_cast<const char*>(img.image.data()), img.image.size());
 
         return path;
     } else {
-        return img.uri;
+        auto uri = std::filesystem::path(handleURI(img.uri));
+        if (uri.is_absolute())
+            return uri;
+        else
+            return std::filesystem::absolute(in_dir / uri);
     }
 }
 
@@ -190,9 +225,7 @@ static void exportMeshPrimitive(const std::filesystem::path& path, const tinyglt
             const uint8* p_i1 = indexData + byteStride * (3 * i + 1);
             const uint8* p_i2 = indexData + byteStride * (3 * i + 2);
 
-            int i0;
-            int i1;
-            int i2;
+            int i0 = 0, i1 = 0, i2 = 0;
             switch (indices->componentType) {
             case TINYGLTF_COMPONENT_TYPE_BYTE:
                 i0 = *reinterpret_cast<const int8*>(p_i0);
@@ -234,7 +267,7 @@ static void exportMeshPrimitive(const std::filesystem::path& path, const tinyglt
             out.write(reinterpret_cast<const char*>(&i2), sizeof(i2));
         }
     } else {
-        for (size_t i = 0; i < triangleCount; ++i) {
+        for (int i = 0; i < static_cast<int>(triangleCount); ++i) {
             int i0      = 3 * i + 0;
             int i1      = 3 * i + 1;
             int i2      = 3 * i + 2;
@@ -245,14 +278,6 @@ static void exportMeshPrimitive(const std::filesystem::path& path, const tinyglt
             out.write(reinterpret_cast<const char*>(&i2), sizeof(i2));
         }
     }
-}
-
-static std::string getTextureName(const tinygltf::Texture& tex)
-{
-    std::string name = "_tex" + std::to_string(tex.source);
-    if (tex.sampler >= 0)
-        name += "_" + std::to_string(tex.sampler);
-    return name;
 }
 
 static std::string getMaterialName(const tinygltf::Material& mat, size_t id)
@@ -269,20 +294,170 @@ inline static bool isMaterialEmissive(const tinygltf::Material& mat)
            || (mat.emissiveFactor.size() == 3 && (mat.emissiveFactor[0] > 0 || mat.emissiveFactor[1] > 0 || mat.emissiveFactor[2] > 0));
 }
 
+#ifdef IG_GLTF_MAP_UNLIT_AS_LIGHT
+inline static bool isMaterialUnlit(const tinygltf::Material& mat)
+{
+    return mat.extensions.count(KHR_materials_unlit.data()) > 0;
+}
+#endif
+
+static std::string getTextureName(const tinygltf::Texture& tex)
+{
+    std::string name = "_tex" + std::to_string(tex.source);
+    if (tex.sampler >= 0)
+        name += "_" + std::to_string(tex.sampler);
+    return name;
+}
+
+inline int getTextureIndex(const tinygltf::Value& val, const std::string& name)
+{
+    if (val.Has(name) && val.Get(name).IsObject()) {
+        const auto& info = val.Get(name);
+        if (info.Has("index") && info.Get("index").IsInt())
+            return info.Get("index").GetNumberAsInt();
+    }
+    return -1;
+}
+
+template <int C>
+inline Eigen::Matrix<float, C, 1> extractVector(const tinygltf::Value& parent, const std::string& name, const Eigen::Matrix<float, C, 1>& def)
+{
+    if (parent.Has(name) && parent.Get(name).IsArray()) {
+        const auto& arr = parent.Get(name);
+
+        if (arr.ArrayLen() == C) {
+            Eigen::Matrix<float, C, 1> ret = def;
+            for (int i = 0; i < C; ++i)
+                ret[i] = (float)arr.Get(i).GetNumberAsDouble();
+            return ret;
+        }
+    }
+
+    return def;
+}
+
+inline Transformf getTextureTransformExts(const tinygltf::Value& t_ext)
+{
+    float rotation  = 0;
+    Vector2f offset = extractVector<2>(t_ext, "offset", Vector2f::Zero());
+    Vector2f scale  = extractVector<2>(t_ext, "scale", Vector2f::Ones());
+    // Ignore texCoord
+
+    if (t_ext.Has("rotation") && t_ext.Get("rotation").IsNumber())
+        rotation = (float)t_ext.Get("rotation").GetNumberAsDouble();
+
+    Transformf transform = Transformf::Identity();
+
+    // Flip Y-UV back [x, 1-y] -> [x, y]
+    transform.scale(Vector3f(1, -1, 1));
+    transform.translate(Vector3f(0, -1, 0));
+
+    transform.translate(Vector3f(offset.x(), offset.y(), 0));
+
+    Matrix3f rotMat          = Matrix3f::Identity();
+    rotMat.block<2, 2>(0, 0) = Eigen::Rotation2Df(-rotation).toRotationMatrix();
+    transform.rotate(rotMat);
+
+    transform.scale(Vector3f(scale.x(), scale.y(), 1));
+
+    // Y-UV is flipped [x, y] -> [x, 1-y]
+    transform.translate(Vector3f(0, 1, 0));
+    transform.scale(Vector3f(1, -1, 1));
+
+    return transform;
+}
+
+inline Transformf getTextureTransform(const tinygltf::Value& parent, const std::string& name, bool& hasOne)
+{
+    if (parent.Has(name) && parent.Get(name).IsObject()) {
+        const auto& info = parent.Get(name);
+        if (info.Has("extensions") && info.Get("extensions").IsObject()) {
+            const auto& exts = info.Get("extensions");
+            if (exts.Has(KHR_texture_transform.data()) && exts.Get(KHR_texture_transform.data()).IsObject()) {
+                const auto& t_ext = exts.Get(KHR_texture_transform.data());
+                hasOne            = true;
+                return getTextureTransformExts(t_ext);
+            }
+        }
+    }
+
+    hasOne = false;
+    return Transformf::Identity();
+}
+
+inline Transformf getTextureTransform(const tinygltf::TextureInfo& info, bool& hasOne)
+{
+    if (info.extensions.count(KHR_texture_transform.data())) {
+        hasOne = true;
+        return getTextureTransformExts(info.extensions.at(KHR_texture_transform.data()));
+    } else {
+        hasOne = false;
+        return Transformf::Identity();
+    }
+}
+
+std::string handleTexture(const tinygltf::TextureInfo& info, Scene& scene, const tinygltf::Model& model, const std::filesystem::path& directory)
+{
+    IG_ASSERT(info.index >= 0, "Expected valid texture info");
+
+    const tinygltf::Texture& tex = model.textures[info.index];
+
+    bool hasTransform    = false;
+    Transformf transform = getTextureTransform(info, hasTransform);
+
+    if (!hasTransform) {
+        return getTextureName(tex);
+    } else {
+        const std::string original_tex = getTextureName(tex);
+        auto obj                       = std::make_shared<Object>(OT_TEXTURE, "transform", directory);
+        obj->setProperty("texture", Property::fromString(original_tex));
+        obj->setProperty("transform", Property::fromTransform(transform));
+
+        const std::string new_name = "__transform_tex_" + std::to_string(scene.textures().size());
+        scene.addTexture(new_name, obj);
+        return new_name;
+    }
+}
+
+std::string handleTexture(const tinygltf::Value& parent, const std::string& name, Scene& scene, const tinygltf::Model& model, const std::filesystem::path& directory)
+{
+    int id = getTextureIndex(parent, name);
+    if (id < 0)
+        return "";
+
+    const tinygltf::Texture& tex = model.textures[id];
+
+    bool hasTransform    = false;
+    Transformf transform = getTextureTransform(parent, name, hasTransform);
+
+    if (!hasTransform) {
+        return getTextureName(tex);
+    } else {
+        const std::string original_tex = getTextureName(tex);
+        auto obj                       = std::make_shared<Object>(OT_TEXTURE, "transform", directory);
+        obj->setProperty("texture", Property::fromString(original_tex));
+        obj->setProperty("transform", Property::fromTransform(transform));
+
+        const std::string new_name = "__transform_tex_" + std::to_string(scene.textures().size());
+        scene.addTexture(new_name, obj);
+        return new_name;
+    }
+}
+
 static void addNode(Scene& scene, const tinygltf::Material& defaultMaterial, const std::filesystem::path& baseDir, const tinygltf::Model& model, const tinygltf::Node& node, const Transformf& parent)
 {
     Transformf transform = parent;
     if (node.matrix.size() == 16)
         transform *= Eigen::Map<Eigen::Matrix4d>(const_cast<double*>(node.matrix.data())).cast<float>();
 
-    if (node.scale.size() == 3)
-        transform.scale(Vector3f(node.scale[0], node.scale[1], node.scale[2]));
+    if (node.translation.size() == 3)
+        transform.translate(Vector3f((float)node.translation[0], (float)node.translation[1], (float)node.translation[2]));
 
     if (node.rotation.size() == 4)
-        transform.rotate(Quaternionf(node.rotation[3], node.rotation[0], node.rotation[1], node.rotation[2]));
+        transform.rotate(Quaternionf((float)node.rotation[3], (float)node.rotation[0], (float)node.rotation[1], (float)node.rotation[2]));
 
-    if (node.translation.size() == 3)
-        transform.translate(Vector3f(node.translation[0], node.translation[1], node.translation[2]));
+    if (node.scale.size() == 3)
+        transform.scale(Vector3f((float)node.scale[0], (float)node.scale[1], (float)node.scale[2]));
 
     if (node.mesh >= 0) {
         size_t primCount           = 0;
@@ -298,11 +473,16 @@ static void addNode(Scene& scene, const tinygltf::Material& defaultMaterial, con
                 mat_id   = (size_t)prim.material;
             }
 
-            const std::string name = mesh.name + "_" + std::to_string(node.mesh) + "_" + std::to_string(primCount);
+            const std::string name     = mesh.name + "_" + std::to_string(node.mesh) + "_" + std::to_string(primCount);
+            const std::string bsdfName = getMaterialName(*material, mat_id);
+
+            const bool hasMedium = material->extensions.count(KHR_materials_volume.data()) > 0; // TODO: Check if distance > 0
 
             auto obj = std::make_shared<Object>(OT_ENTITY, "", baseDir);
             obj->setProperty("shape", Property::fromString(name));
-            obj->setProperty("bsdf", Property::fromString(getMaterialName(*material, mat_id)));
+            obj->setProperty("bsdf", Property::fromString(bsdfName));
+            if (hasMedium)
+                obj->setProperty("inner_medium", Property::fromString(bsdfName)); // Shares the same name as the bsdf
             obj->setProperty("transform", Property::fromTransform(transform));
 
             const std::string entity_name = node.name + std::to_string(scene.entities().size()) + "_" + name;
@@ -313,23 +493,44 @@ static void addNode(Scene& scene, const tinygltf::Material& defaultMaterial, con
                 light->setProperty("entity", Property::fromString(entity_name));
 
                 float strength = 1;
-                if (material->extensions.count("KHR_materials_emissive_strength")) {
-                    const auto& ext = material->extensions.at("KHR_materials_emissive_strength");
+                if (material->extensions.count(KHR_materials_emissive_strength.data())) {
+                    const auto& ext = material->extensions.at(KHR_materials_emissive_strength.data());
                     if (ext.Has("emissiveStrength") && ext.Get("emissiveStrength").IsNumber()) {
-                        strength = ext.Get("emissiveStrength").GetNumberAsDouble();
+                        strength = static_cast<float>(ext.Get("emissiveStrength").GetNumberAsDouble());
                     }
                 }
 
                 if (material->emissiveTexture.index >= 0) {
-                    const tinygltf::Texture& tex = model.textures[material->emissiveTexture.index];
-                    light->setProperty("radiance", Property::fromString(getTextureName(tex)));
-                    light->setProperty("radiance_scale", Property::fromVector3(Vector3f(material->emissiveFactor[0], material->emissiveFactor[1], material->emissiveFactor[2]) * strength));
+                    const std::string tex = handleTexture(material->emissiveTexture, scene, model, baseDir);
+                    light->setProperty("radiance", Property::fromString(tex + "*color("
+                                                                        + std::to_string((float)material->emissiveFactor[0])
+                                                                        + ", " + std::to_string((float)material->emissiveFactor[1])
+                                                                        + ", " + std::to_string((float)material->emissiveFactor[2]) + ")"));
                 } else {
-                    light->setProperty("radiance", Property::fromVector3(Vector3f(material->emissiveFactor[0], material->emissiveFactor[1], material->emissiveFactor[2]) * strength));
+                    light->setProperty("radiance", Property::fromVector3(Vector3f((float)material->emissiveFactor[0], (float)material->emissiveFactor[1], (float)material->emissiveFactor[2]) * strength));
                 }
 
                 scene.addLight("_light_" + entity_name, light);
             }
+#ifdef IG_GLTF_MAP_UNLIT_AS_LIGHT
+            else if (isMaterialUnlit(*material)) {
+                // Approximative unlit (which lits other parts)
+                auto light = std::make_shared<Object>(OT_LIGHT, "area", baseDir);
+                light->setProperty("entity", Property::fromString(entity_name));
+
+                if (material->pbrMetallicRoughness.baseColorTexture.index >= 0) {
+                    const std::string tex = handleTexture(mat.pbrMetallicRoughness.baseColorTexture, scene, model, directory);
+                    bsdf->setProperty("radiance", Property::fromString(tex + "*color("
+                                                                       + std::to_string((float)mat.pbrMetallicRoughness.baseColorFactor[0])
+                                                                       + ", " + std::to_string((float)mat.pbrMetallicRoughness.baseColorFactor[1])
+                                                                       + ", " + std::to_string((float)mat.pbrMetallicRoughness.baseColorFactor[2]) + ")"));
+                } else {
+                    light->setProperty("radiance", Property::fromVector3(Vector3f((float)material->pbrMetallicRoughness.baseColorFactor[0], (float)material->pbrMetallicRoughness.baseColorFactor[1], (float)material->pbrMetallicRoughness.baseColorFactor[2])));
+                }
+
+                scene.addLight("_light_" + entity_name, light);
+            }
+#endif
 
             ++primCount;
         }
@@ -347,28 +548,30 @@ static void addNode(Scene& scene, const tinygltf::Material& defaultMaterial, con
             Transformf cameraTransform;
             cameraTransform.fromPositionOrientationScale(trans, rot, Vector3f::Ones());
 
+            cameraTransform.scale(Vector3f(1, 1, -1)); // Flip -z to z
+
             const tinygltf::Camera& camera = model.cameras[node.camera];
             if (camera.type == "orthographic") {
                 auto obj = std::make_shared<Object>(OT_CAMERA, "orthographic", baseDir);
                 obj->setProperty("transform", Property::fromTransform(cameraTransform));
-                obj->setProperty("near_clip", Property::fromNumber(camera.orthographic.znear));
-                obj->setProperty("far_clip", Property::fromNumber(camera.orthographic.zfar));
+                obj->setProperty("near_clip", Property::fromNumber((float)camera.orthographic.znear));
+                obj->setProperty("far_clip", Property::fromNumber((float)camera.orthographic.zfar));
                 // TODO: xmag, ymag
                 scene.setCamera(obj);
             } else {
                 auto obj = std::make_shared<Object>(OT_CAMERA, "perspective", baseDir);
                 obj->setProperty("transform", Property::fromTransform(cameraTransform));
-                obj->setProperty("fov", Property::fromNumber(camera.perspective.yfov));
-                obj->setProperty("near_clip", Property::fromNumber(camera.perspective.znear));
-                obj->setProperty("far_clip", Property::fromNumber(camera.perspective.zfar));
+                obj->setProperty("fov", Property::fromNumber((float)camera.perspective.yfov * Rad2Deg));
+                obj->setProperty("near_clip", Property::fromNumber((float)camera.perspective.znear));
+                obj->setProperty("far_clip", Property::fromNumber((float)camera.perspective.zfar));
                 // TODO: aspect ratio
                 scene.setCamera(obj);
             }
         }
     }
 
-    if (node.extensions.count("KHR_lights_punctual") > 0) {
-        const auto& ext = node.extensions.at("KHR_lights_punctual");
+    if (node.extensions.count(KHR_lights_punctual.data()) > 0) {
+        const auto& ext = node.extensions.at(KHR_lights_punctual.data());
         if (ext.Has("light") && ext.Get("light").IsInt()) {
             int lightID = ext.Get("light").GetNumberAsInt();
 
@@ -377,7 +580,7 @@ static void addNode(Scene& scene, const tinygltf::Material& defaultMaterial, con
 
                 Vector3f color = Vector3f::Ones() * light.intensity;
                 if (light.color.size() == 3)
-                    color = Vector3f(light.color[0], light.color[1], light.color[2]) * light.intensity;
+                    color = Vector3f((float)light.color[0], (float)light.color[1], (float)light.color[2]) * (float)light.intensity;
 
                 std::string type;
                 if (light.type == "point" || light.type == "spot") {
@@ -401,48 +604,8 @@ static void addNode(Scene& scene, const tinygltf::Material& defaultMaterial, con
         addNode(scene, defaultMaterial, baseDir, model, model.nodes[child], transform);
 }
 
-inline int getTextureIndex(const tinygltf::Value& val, const std::string& name)
+static void loadTextures(Scene& scene, const tinygltf::Model& model, const std::filesystem::path& directory, const std::filesystem::path& cache_dir)
 {
-    if (val.Has(name) && val.Get(name).IsObject()) {
-        const auto& info = val.Get(name);
-        if (info.Has("index") && info.Get("index").IsInt())
-            return info.Get("index").GetNumberAsDouble();
-    }
-    return -1;
-}
-
-Scene glTFSceneParser::loadFromFile(const std::filesystem::path& path, bool& ok)
-{
-    std::filesystem::path directory = path.parent_path();
-    std::filesystem::path cache_dir = directory / (std::string("_ignis_cache_") + path.stem().generic_u8string());
-
-    std::filesystem::create_directories(cache_dir);
-    std::filesystem::create_directories(cache_dir / "images");
-    std::filesystem::create_directories(cache_dir / "meshes");
-
-    tinygltf::Model model;
-    tinygltf::TinyGLTF loader;
-    std::string err;
-    std::string warn;
-
-    loader.SetImageLoader(imageLoader, nullptr);
-
-    if (path.extension() == ".glb")
-        ok = loader.LoadBinaryFromFile(&model, &err, &warn, path.generic_u8string());
-    else
-        ok = loader.LoadASCIIFromFile(&model, &err, &warn, path.generic_u8string());
-
-    if (!warn.empty())
-        IG_LOG(L_WARNING) << "glTF '" << path << "': " << warn << std::endl;
-
-    if (!err.empty())
-        IG_LOG(L_ERROR) << "glTF '" << path << "': " << err << std::endl;
-
-    if (!ok)
-        return {};
-
-    Scene scene;
-
     std::unordered_map<int, std::filesystem::path> loaded_images;
     for (const auto& tex : model.textures) {
         std::filesystem::path img_path;
@@ -450,10 +613,7 @@ Scene glTFSceneParser::loadFromFile(const std::filesystem::path& path, bool& ok)
             img_path = loaded_images[tex.source];
         } else {
             const tinygltf::Image& img = model.images[tex.source];
-            img_path                   = exportImage(img, model, tex.source, cache_dir / "images");
-
-            if (img_path.is_relative())
-                img_path = directory / img_path;
+            img_path                   = exportImage(img, model, tex.source, cache_dir / "images", directory);
 
             loaded_images[tex.source] = img_path;
         }
@@ -504,87 +664,81 @@ Scene glTFSceneParser::loadFromFile(const std::filesystem::path& path, bool& ok)
 
         scene.addTexture(getTextureName(tex), obj);
     }
+}
 
-    tinygltf::Material defaultMaterial;
-    tinygltf::ParseMaterial(&defaultMaterial, nullptr, {}, false);
-    model.materials.push_back(defaultMaterial);
-
+static void loadMaterials(Scene& scene, const tinygltf::Model& model, const std::filesystem::path& directory)
+{
     size_t matCounter = 0;
     for (const auto& mat : model.materials) {
-        // TODO: Add proper support for texture views etc
         std::string name = getMaterialName(mat, matCounter);
         auto bsdf        = std::make_shared<Object>(OT_BSDF, "principled", directory);
 
         if (mat.pbrMetallicRoughness.baseColorTexture.index >= 0) {
-            const tinygltf::Texture& tex = model.textures[mat.pbrMetallicRoughness.baseColorTexture.index];
-            bsdf->setProperty("base_color", Property::fromString(getTextureName(tex)));
-            bsdf->setProperty("base_color_scale", Property::fromVector3(Vector3f(mat.pbrMetallicRoughness.baseColorFactor[0], mat.pbrMetallicRoughness.baseColorFactor[1], mat.pbrMetallicRoughness.baseColorFactor[2])));
+            const std::string tex = handleTexture(mat.pbrMetallicRoughness.baseColorTexture, scene, model, directory);
+            bsdf->setProperty("base_color", Property::fromString(tex + "*color("
+                                                                 + std::to_string((float)mat.pbrMetallicRoughness.baseColorFactor[0])
+                                                                 + ", " + std::to_string((float)mat.pbrMetallicRoughness.baseColorFactor[1])
+                                                                 + ", " + std::to_string((float)mat.pbrMetallicRoughness.baseColorFactor[2]) + ")"));
         } else {
-            bsdf->setProperty("base_color", Property::fromVector3(Vector3f(mat.pbrMetallicRoughness.baseColorFactor[0], mat.pbrMetallicRoughness.baseColorFactor[1], mat.pbrMetallicRoughness.baseColorFactor[2])));
+            bsdf->setProperty("base_color", Property::fromVector3(Vector3f((float)mat.pbrMetallicRoughness.baseColorFactor[0], (float)mat.pbrMetallicRoughness.baseColorFactor[1], (float)mat.pbrMetallicRoughness.baseColorFactor[2])));
         }
 
         if (mat.pbrMetallicRoughness.metallicRoughnessTexture.index >= 0) {
-            const tinygltf::Texture& tex = model.textures[mat.pbrMetallicRoughness.metallicRoughnessTexture.index];
-            bsdf->setProperty("metallic", Property::fromString(getTextureName(tex) + ".b"));
-            bsdf->setProperty("roughness", Property::fromString(getTextureName(tex) + ".g"));
-            bsdf->setProperty("metallic_scale", Property::fromNumber(mat.pbrMetallicRoughness.metallicFactor));
-            bsdf->setProperty("roughness_scale", Property::fromNumber(mat.pbrMetallicRoughness.roughnessFactor));
+            const std::string mrtex = handleTexture(mat.pbrMetallicRoughness.metallicRoughnessTexture, scene, model, directory);
+            bsdf->setProperty("metallic", Property::fromString(mrtex + ".b*" + std::to_string((float)mat.pbrMetallicRoughness.metallicFactor)));
+            bsdf->setProperty("roughness", Property::fromString(mrtex + ".g*" + std::to_string((float)mat.pbrMetallicRoughness.roughnessFactor)));
         } else {
-            bsdf->setProperty("metallic", Property::fromNumber(mat.pbrMetallicRoughness.metallicFactor));
-            bsdf->setProperty("roughness", Property::fromNumber(mat.pbrMetallicRoughness.roughnessFactor));
+            bsdf->setProperty("metallic", Property::fromNumber((float)mat.pbrMetallicRoughness.metallicFactor));
+            bsdf->setProperty("roughness", Property::fromNumber((float)mat.pbrMetallicRoughness.roughnessFactor));
         }
 
         // Extensions
-        if (mat.extensions.count("KHR_materials_ior") > 0) {
-            const auto& ext = mat.extensions.at("KHR_materials_ior");
+        if (mat.extensions.count(KHR_materials_ior.data()) > 0) {
+            const auto& ext = mat.extensions.at(KHR_materials_ior.data());
             if (ext.Has("ior") && ext.Get("ior").IsNumber()) {
-                bsdf->setProperty("ior", Property::fromNumber(ext.Get("ior").GetNumberAsDouble()));
+                bsdf->setProperty("ior", Property::fromNumber((float)ext.Get("ior").GetNumberAsDouble()));
             }
+        } else {
+            bsdf->setProperty("ior", Property::fromNumber(1.5));
         }
 
-        if (mat.extensions.count("KHR_materials_sheen") > 0) {
-            const auto& ext = mat.extensions.at("KHR_materials_sheen");
-            const int texID = getTextureIndex(ext, "sheenColorTexture");
+        if (mat.extensions.count(KHR_materials_sheen.data()) > 0) {
+            const auto& ext       = mat.extensions.at(KHR_materials_sheen.data());
+            const std::string tex = handleTexture(ext, "sheenColorTexture", scene, model, directory);
 
             float factor = 0;
             if (ext.Has("sheenColorFactor") && ext.Get("sheenColorFactor").IsNumber())
-                factor = ext.Get("sheenColorFactor").GetNumberAsInt();
+                factor = static_cast<float>(ext.Get("sheenColorFactor").GetNumberAsDouble());
 
             // No support for colored sheen
-            if (texID >= 0) {
-                const tinygltf::Texture& tex = model.textures[texID];
-                bsdf->setProperty("sheen", Property::fromString(getTextureName(tex) + ".m"));
-                bsdf->setProperty("sheen_scale", Property::fromNumber(factor));
-            } else {
+            if (!tex.empty())
+                bsdf->setProperty("sheen", Property::fromString("avg(" + tex + ")*" + std::to_string(factor)));
+            else
                 bsdf->setProperty("sheen", Property::fromNumber(factor));
-            }
         }
 
         // Only support for transmissionFactor & transmissionTexture
-        if (mat.extensions.count("KHR_materials_transmission") > 0) {
-            const auto& ext = mat.extensions.at("KHR_materials_transmission");
-            const int texID = getTextureIndex(ext, "transmissionTexture");
+        if (mat.extensions.count(KHR_materials_transmission.data()) > 0) {
+            const auto& ext       = mat.extensions.at(KHR_materials_transmission.data());
+            const std::string tex = handleTexture(ext, "transmissionTexture", scene, model, directory);
 
             float factor = 0;
             if (ext.Has("transmissionFactor") && ext.Get("transmissionFactor").IsNumber())
-                factor = ext.Get("transmissionFactor").GetNumberAsDouble();
+                factor = static_cast<float>(ext.Get("transmissionFactor").GetNumberAsDouble());
 
-            if (texID >= 0) {
-                const tinygltf::Texture& tex = model.textures[texID];
-                bsdf->setProperty("specular_transmission", Property::fromString(getTextureName(tex) + ".r"));
-                bsdf->setProperty("specular_transmission_scale", Property::fromNumber(factor));
-            } else {
+            if (!tex.empty())
+                bsdf->setProperty("specular_transmission", Property::fromString(tex + ".r*" + std::to_string(factor)));
+            else
                 bsdf->setProperty("specular_transmission", Property::fromNumber(factor));
-            }
 
             bool is_thin = true;
-            if (mat.extensions.count("KHR_materials_volume")) {
-                const auto& ext2 = mat.extensions.at("KHR_materials_transmission");
+            if (mat.extensions.count(KHR_materials_volume.data()) > 0) {
+                const auto& ext2 = mat.extensions.at(KHR_materials_volume.data());
 
                 // TODO: No support for textures
                 float thickness = 0;
                 if (ext2.Has("thicknessFactor") && ext2.Get("thicknessFactor").IsNumber())
-                    thickness = ext2.Get("thicknessFactor").GetNumberAsDouble();
+                    thickness = static_cast<float>(ext2.Get("thicknessFactor").GetNumberAsDouble());
                 is_thin = thickness <= FltEps;
             }
 
@@ -592,52 +746,66 @@ Scene glTFSceneParser::loadFromFile(const std::filesystem::path& path, bool& ok)
         }
 
         // Not ratified yet, but who cares
-        if (mat.extensions.count("KHR_materials_translucency") > 0) {
-            const auto& ext = mat.extensions.at("KHR_materials_translucency");
-            const int texID = getTextureIndex(ext, "translucencyTexture");
+        if (mat.extensions.count(KHR_materials_translucency.data()) > 0) {
+            const auto& ext       = mat.extensions.at(KHR_materials_translucency.data());
+            const std::string tex = handleTexture(ext, "translucencyTexture", scene, model, directory);
 
             float factor = 0;
             if (ext.Has("translucencyFactor") && ext.Get("translucencyFactor").IsNumber())
-                factor = ext.Get("translucencyFactor").GetNumberAsDouble();
+                factor = static_cast<float>(ext.Get("translucencyFactor").GetNumberAsDouble());
 
-            if (texID >= 0) {
-                const tinygltf::Texture& tex = model.textures[texID];
-                bsdf->setProperty("diffuse_transmission", Property::fromString(getTextureName(tex) + ".r"));
-                bsdf->setProperty("diffuse_transmission_scale", Property::fromNumber(factor));
-            } else {
+            if (!tex.empty())
+                bsdf->setProperty("diffuse_transmission", Property::fromString(tex + ".r*" + std::to_string(factor)));
+            else
                 bsdf->setProperty("diffuse_transmission", Property::fromNumber(factor));
+        }
+
+        // No support for thickness as this is a raytracer
+        if (mat.extensions.count(KHR_materials_volume.data()) > 0) {
+            const auto& ext = mat.extensions.at(KHR_materials_volume.data());
+
+            float thickness = 0;
+            if (ext.Has("thicknessFactor") && ext.Get("thicknessFactor").IsNumber())
+                thickness = static_cast<float>(ext.Get("thicknessFactor").GetNumberAsDouble());
+
+            float distance = std::numeric_limits<float>::infinity();
+            if (ext.Has("attenuationDistance") && ext.Get("attenuationDistance").IsNumber())
+                distance = static_cast<float>(ext.Get("attenuationDistance").GetNumberAsDouble());
+
+            if (distance > FltEps && thickness > FltEps) {
+                Vector3f color   = extractVector<3>(ext, "attenuationColor", Vector3f::Ones());
+                Vector3f sigma_a = -color.array().log() / distance;
+                auto medium      = std::make_shared<Object>(OT_MEDIUM, "homogeneous", directory);
+                medium->setProperty("sigma_s", Property::fromVector3(Vector3f::Zero()));
+                medium->setProperty("sigma_a", Property::fromVector3(sigma_a));
+
+                scene.addMedium(name, medium);
             }
         }
 
         // No support for clearcoatNormalTexture
-        if (mat.extensions.count("KHR_materials_clearcoat") > 0) {
-            const auto& ext = mat.extensions.at("KHR_materials_clearcoat");
-            const int texID = getTextureIndex(ext, "clearcoatTexture");
+        if (mat.extensions.count(KHR_materials_clearcoat.data()) > 0) {
+            const auto& ext       = mat.extensions.at(KHR_materials_clearcoat.data());
+            const std::string tex = handleTexture(ext, "clearcoatTexture", scene, model, directory);
 
             float factor = 0;
             if (ext.Has("clearcoatFactor") && ext.Get("clearcoatFactor").IsNumber())
-                factor = ext.Get("clearcoatFactor").GetNumberAsDouble();
+                factor = static_cast<float>(ext.Get("clearcoatFactor").GetNumberAsDouble());
 
-            if (texID >= 0) {
-                const tinygltf::Texture& tex = model.textures[texID];
-                bsdf->setProperty("clearcoat", Property::fromString(getTextureName(tex) + ".r"));
-                bsdf->setProperty("clearcoat_scale", Property::fromNumber(factor));
-            } else {
+            if (!tex.empty())
+                bsdf->setProperty("clearcoat", Property::fromString(tex + ".r*" + std::to_string(factor)));
+            else
                 bsdf->setProperty("clearcoat", Property::fromNumber(factor));
-            }
 
-            const int rTexID = getTextureIndex(ext, "clearcoatRoughnessTexture");
-            float rfactor    = 0;
+            const std::string rtex = handleTexture(ext, "clearcoatRoughnessTexture", scene, model, directory);
+            float rfactor          = 0;
             if (ext.Has("clearcoatRoughnessFactor") && ext.Get("clearcoatRoughnessFactor").IsNumber())
-                rfactor = ext.Get("clearcoatRoughnessFactor").GetNumberAsDouble();
+                rfactor = static_cast<float>(ext.Get("clearcoatRoughnessFactor").GetNumberAsDouble());
 
-            if (rTexID >= 0) {
-                const tinygltf::Texture& tex = model.textures[rTexID];
-                bsdf->setProperty("clearcoat_roughness", Property::fromString(getTextureName(tex) + ".g"));
-                bsdf->setProperty("clearcoat_roughness_scale", Property::fromNumber(rfactor));
-            } else {
+            if (!rtex.empty())
+                bsdf->setProperty("clearcoat_roughness", Property::fromString(rtex + ".g*" + std::to_string(rfactor)));
+            else
                 bsdf->setProperty("clearcoat_roughness", Property::fromNumber(rfactor));
-            }
         }
 
         if (mat.normalTexture.index >= 0) {
@@ -656,14 +824,13 @@ Scene glTFSceneParser::loadFromFile(const std::filesystem::path& path, bool& ok)
             bsdf->setProperty("bsdf", Property::fromString(name + "_blend_inner"));
             bsdf->setProperty("inverted", Property::fromBool(true));
 
-            float factor = mat.pbrMetallicRoughness.baseColorFactor[3];
+            auto factor = static_cast<float>(mat.pbrMetallicRoughness.baseColorFactor[3]);
             if (factor > 0 && mat.pbrMetallicRoughness.baseColorTexture.index >= 0) {
-                const tinygltf::Texture& tex = model.textures[mat.pbrMetallicRoughness.baseColorTexture.index];
-                bsdf->setProperty("weight", Property::fromString(getTextureName(tex) + ".a"));
-                bsdf->setProperty("cutoff", Property::fromNumber(mat.alphaCutoff / factor));
+                bsdf->setProperty("weight", Property::fromString(handleTexture(mat.pbrMetallicRoughness.baseColorTexture, scene, model, directory) + ".a"));
+                bsdf->setProperty("cutoff", Property::fromNumber((float)mat.alphaCutoff / factor));
             } else {
                 bsdf->setProperty("weight", Property::fromNumber(factor));
-                bsdf->setProperty("cutoff", Property::fromNumber(mat.alphaCutoff));
+                bsdf->setProperty("cutoff", Property::fromNumber((float)mat.alphaCutoff));
             }
         } else if (mat.alphaMode == "BLEND") {
             scene.addBSDF(name + "_blend_inner", bsdf);
@@ -672,18 +839,63 @@ Scene glTFSceneParser::loadFromFile(const std::filesystem::path& path, bool& ok)
             bsdf->setProperty("bsdf", Property::fromString(name + "_blend_inner"));
             bsdf->setProperty("inverted", Property::fromBool(true));
 
-            float factor = mat.pbrMetallicRoughness.baseColorFactor[3];
+            auto factor = static_cast<float>(mat.pbrMetallicRoughness.baseColorFactor[3]);
             if (factor > 0 && mat.pbrMetallicRoughness.baseColorTexture.index >= 0) {
-                const tinygltf::Texture& tex = model.textures[mat.pbrMetallicRoughness.baseColorTexture.index];
-                bsdf->setProperty("weight", Property::fromString(getTextureName(tex) + ".a"));
+                bsdf->setProperty("weight", Property::fromString(handleTexture(mat.pbrMetallicRoughness.baseColorTexture, scene, model, directory) + ".a"));
             } else {
                 bsdf->setProperty("weight", Property::fromNumber(factor));
             }
         }
 
+        if (mat.doubleSided) {
+            scene.addBSDF(name + "_ds_inner", bsdf);
+            bsdf = std::make_shared<Object>(OT_BSDF, "doublesided", directory);
+            bsdf->setProperty("bsdf", Property::fromString(name + "_ds_inner"));
+        }
+
         scene.addBSDF(name, bsdf);
         ++matCounter;
     }
+}
+
+Scene glTFSceneParser::loadFromFile(const std::filesystem::path& path, bool& ok)
+{
+    std::filesystem::path directory = path.parent_path();
+    std::filesystem::path cache_dir = directory / (std::string("_ignis_cache_") + path.stem().generic_u8string());
+
+    std::filesystem::create_directories(cache_dir);
+    std::filesystem::create_directories(cache_dir / "images");
+    std::filesystem::create_directories(cache_dir / "meshes");
+
+    tinygltf::Model model;
+    tinygltf::TinyGLTF loader;
+    std::string err;
+    std::string warn;
+
+    loader.SetImageLoader(imageLoader, nullptr);
+
+    if (path.extension() == ".glb")
+        ok = loader.LoadBinaryFromFile(&model, &err, &warn, path.generic_u8string());
+    else
+        ok = loader.LoadASCIIFromFile(&model, &err, &warn, path.generic_u8string());
+
+    if (!warn.empty())
+        IG_LOG(L_WARNING) << "glTF '" << path << "': " << warn << std::endl;
+
+    if (!err.empty())
+        IG_LOG(L_ERROR) << "glTF '" << path << "': " << err << std::endl;
+
+    if (!ok)
+        return {};
+
+    Scene scene;
+    loadTextures(scene, model, directory, cache_dir);
+
+    tinygltf::Material defaultMaterial;
+    tinygltf::ParseMaterial(&defaultMaterial, nullptr, {}, false);
+    model.materials.push_back(defaultMaterial);
+
+    loadMaterials(scene, model, directory);
 
     size_t meshCount = 0;
     for (const auto& mesh : model.meshes) {
@@ -708,5 +920,4 @@ Scene glTFSceneParser::loadFromFile(const std::filesystem::path& path, bool& ok)
 
     return scene;
 }
-} // namespace Parser
-} // namespace IG
+} // namespace IG::Parser

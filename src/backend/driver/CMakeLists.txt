@@ -191,14 +191,18 @@ set(_targets )
 foreach(var ${VARIANTS})
     var_to_name(var_name ${var})
     message(VERBOSE "Driver: ${var_name} = ${var}")
+
+    # Create driver specific code
     set(out_file "${CMAKE_CURRENT_BINARY_DIR}/driver_${var_name}.art")
     separate_arguments(args UNIX_COMMAND ${var})
     add_custom_command(
-        OUTPUT "${out_file}"
-        COMMAND $<TARGET_FILE:stpp> ${args} ${CMAKE_CURRENT_SOURCE_DIR}/tracer.artpp > ${out_file}
-        MAIN_DEPENDENCY tracer.artpp
+        OUTPUT ${out_file}
+        COMMAND $<TARGET_FILE:stpp> ${args} ${CMAKE_CURRENT_SOURCE_DIR}/device.artpp ${out_file}
+        MAIN_DEPENDENCY device.artpp
         COMMENT "Generating variant file: ${out_file}" 
         VERBATIM)
+
+    # Compile with artic
     set(_objs ) # Reset list
     set(_interface_name driver_interface_${var_name})
     anydsl_runtime_wrap(_objs
@@ -206,14 +210,19 @@ foreach(var ${VARIANTS})
         FRONTEND "artic"
         CLANG_FLAGS ${IG_ARTIC_CLANG_FLAGS}
         ARTIC_FLAGS ${IG_ARTIC_FLAGS} --log-level info -Wall
-        FILES ${ARTIC_MAIN_SRC} ${out_file})
+        FILES ${ARTIC_MAIN_SRC} ${out_file} tonemapper.art tracer.art)
+
+    # Construct shared library for runtime loading
     set(_target_name ig_driver_${var_name})
     add_library(${_target_name} MODULE ${_objs} glue.cpp ShallowArray.h)
     set_target_properties(${_target_name} PROPERTIES PREFIX "")
     target_compile_definitions(${_target_name} PRIVATE ${args})
-    target_link_libraries(${_target_name} PRIVATE ${AnyDSL_runtime_LIBRARIES} ig_lib_runtime)
-    target_include_directories(${_target_name} PUBLIC $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}>)
+    target_link_libraries(${_target_name} PRIVATE ${AnyDSL_runtime_LIBRARIES} ${AnyDSL_runtime_ARTIC_JIT_LIBRARIES} ig_lib_runtime TBB::tbb)
+    target_include_directories(${_target_name} PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>)
+    target_include_directories(${_target_name} PRIVATE ${AnyDSL_runtime_INCLUDE_DIRS})
     add_dependencies(${_target_name} artic_c_interface)
+    add_lto(${_target_name})
+    add_checks(${_target_name})
     install(TARGETS ${_target_name} COMPONENT runtime LIBRARY DESTINATION lib/)
 
     # Some of the compilation process requires a lot of memory.

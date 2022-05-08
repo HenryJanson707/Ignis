@@ -2,7 +2,9 @@
 #include "Logger.h"
 #include "loader/Loader.h"
 #include "loader/LoaderBSDF.h"
+#include "loader/LoaderCamera.h"
 #include "loader/LoaderLight.h"
+#include "loader/LoaderMedium.h"
 #include "loader/LoaderTechnique.h"
 #include "loader/ShaderUtils.h"
 #include "loader/ShadingTree.h"
@@ -12,7 +14,7 @@
 namespace IG {
 using namespace Parser;
 
-std::string HitShader::setup(int entity_id, LoaderContext& ctx)
+std::string HitShader::setup(size_t mat_id, LoaderContext& ctx)
 {
     std::stringstream stream;
 
@@ -27,9 +29,12 @@ std::string HitShader::setup(int entity_id, LoaderContext& ctx)
 
     ShadingTree tree(ctx);
     const bool requireLights = ctx.CurrentTechniqueVariantInfo().UsesLights;
-    if (requireLights) {
+    if (requireLights)
         stream << LoaderLight::generate(tree, false) << std::endl;
-    }
+
+    const bool requireMedia = ctx.CurrentTechniqueVariantInfo().UsesMedia;
+    if (requireMedia)
+        stream << LoaderMedium::generate(tree) << std::endl;
 
     stream << "  let acc  = SceneAccessor {" << std::endl
            << "    info     = " << ShaderUtils::inlineSceneInfo(ctx) << "," << std::endl
@@ -44,21 +49,29 @@ std::string HitShader::setup(int entity_id, LoaderContext& ctx)
            << "  };" << std::endl
            << std::endl;
 
-    const std::string bsdf_name = ctx.Environment.Entities[entity_id].BSDF;
-    stream << LoaderBSDF::generate(bsdf_name, tree);
+    const Material material = ctx.Environment.Materials.at(mat_id);
+    stream << LoaderBSDF::generate(material.BSDF, tree);
 
-    const std::string entity_name = ctx.Environment.Entities[entity_id].Name;
-    const bool isLight            = ctx.Environment.AreaLightsMap.count(entity_name) > 0;
+    const bool isLight = material.hasEmission() && ctx.Environment.AreaLightsMap.count(material.Entity) > 0;
+
+    if (material.hasMediumInterface())
+        stream << "  let medium_interface = make_medium_interface(" << material.MediumInner << ", " << material.MediumOuter << ");" << std::endl;
+    else
+        stream << "  let medium_interface = no_medium_interface();" << std::endl;
 
     if (isLight && requireLights) {
-        const std::string light_name = ctx.Environment.AreaLightsMap[entity_name];
-        stream << "  let shader : Shader = @|ray, hit, surf| make_emissive_material(surf, bsdf_" << ShaderUtils::escapeIdentifier(bsdf_name) << "(ray, hit, surf), "
-               << "light_" << ShaderUtils::escapeIdentifier(light_name) << ");" << std::endl
+        const uint32 light_id = ctx.Environment.AreaLightsMap.at(material.Entity);
+        stream << "  let shader : Shader = @|ray, hit, surf| make_emissive_material(" << mat_id << ", surf, bsdf_" << ShaderUtils::escapeIdentifier(material.BSDF) << "(ray, hit, surf), medium_interface,"
+               << " @lights(" << light_id << "));" << std::endl
                << std::endl;
     } else {
-        stream << "  let shader : Shader = @|ray, hit, surf| make_material(bsdf_" << ShaderUtils::escapeIdentifier(bsdf_name) << "(ray, hit, surf));" << std::endl
+        stream << "  let shader : Shader = @|ray, hit, surf| make_material(" << mat_id << ", bsdf_" << ShaderUtils::escapeIdentifier(material.BSDF) << "(ray, hit, surf), medium_interface);" << std::endl
                << std::endl;
     }
+
+    // Include camera if necessary
+    if (ctx.CurrentTechniqueVariantInfo().RequiresExplicitCamera)
+        stream << LoaderCamera::generate(ctx) << std::endl;
 
     stream << "  let spp = " << ctx.SamplesPerIteration << " : i32;" << std::endl;
 

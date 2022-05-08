@@ -44,8 +44,42 @@ static void bi_body_loader(std::ostream& stream, const std::string&, const std::
 
 static void debug_body_loader(std::ostream& stream, const std::string&, const std::shared_ptr<Parser::Object>&, const LoaderContext&)
 {
-    stream << "  let technique = make_debug_renderer(settings.debug_mode);" << std::endl;
+    // TODO: Maybe add a changeable default mode?
+    stream << "  let debug_mode = registry::get_parameter_i32(\"__debug_mode\", 0);" << std::endl
+           << "  maybe_unused(num_lights); maybe_unused(lights);" << std::endl
+           << "  let technique  = make_debug_renderer(debug_mode);" << std::endl;
 }
+
+static TechniqueInfo debug_get_info(const std::string&, const std::shared_ptr<Parser::Object>&, const LoaderContext&)
+{
+    TechniqueInfo info;
+    info.Variants[0].UsesLights = true; // We make use of the emissive information!
+    return info;
+}
+
+/////////////////////////
+
+static void wireframe_body_loader(std::ostream& stream, const std::string&, const std::shared_ptr<Parser::Object>&, const LoaderContext&)
+{
+    // Camera was defined by RequiresExplicitCamera flag
+    stream << "  let technique = make_wireframe_renderer(camera);" << std::endl;
+}
+
+static void wireframe_header_loader(std::ostream& stream, const std::string&, const std::shared_ptr<Parser::Object>&, const LoaderContext&)
+{
+    constexpr int C = 1 /* Depth */ + 1 /* Distance */;
+    stream << "static RayPayloadComponents = " << C << ";" << std::endl
+           << "fn init_raypayload() = wrap_wireframeraypayload(WireframeRayPayload { depth = 1, distance = 0 });" << std::endl;
+}
+
+static TechniqueInfo wireframe_get_info(const std::string&, const std::shared_ptr<Parser::Object>&, const LoaderContext&)
+{
+    TechniqueInfo info;
+    info.Variants[0].RequiresExplicitCamera = true; // We make use of the camera differential!
+    return info;
+}
+
+/////////////////////////
 
 static TechniqueInfo path_get_info(const std::string&, const std::shared_ptr<Parser::Object>& technique, const LoaderContext&)
 {
@@ -57,16 +91,12 @@ static TechniqueInfo path_get_info(const std::string&, const std::shared_ptr<Par
     // It is totally fine to only define the type by other means then the scene config
     if (technique) {
         if (technique->property("aov_normals").getBool(false))
-            info.EnabledAOVs.push_back("Normals");
+            info.EnabledAOVs.emplace_back("Normals");
 
         if (technique->property("aov_mis").getBool(false)) {
-            info.EnabledAOVs.push_back("Direct Weights");
-            info.EnabledAOVs.push_back("NEE Weights");
+            info.EnabledAOVs.emplace_back("Direct Weights");
+            info.EnabledAOVs.emplace_back("NEE Weights");
             info.Variants[0].UseAdvancedShadowHandling = true;
-        }
-
-        if (technique->property("aov_stats").getBool(false)) {
-            info.EnabledAOVs.push_back("Stats");
         }
     }
 
@@ -128,6 +158,7 @@ static void path_body_loader(std::ostream& stream, const std::string&, const std
     stream << "  let buf = device.request_buffer(\"bi\", buf_size, 0);" << std::endl;
 
     const int max_depth     = technique ? technique->property("max_depth").getInteger(64) : 64;
+    const float clamp_value = technique ? technique->property("clamp").getNumber(0) : 0; // Allow clamping of contributions
     const bool hasNormalAOV = technique ? technique->property("aov_normals").getBool(false) : false;
     const bool hasMISAOV    = technique ? technique->property("aov_mis").getBool(false) : false;
     const bool hasStatsAOV  = technique ? technique->property("aov_stats").getBool(false) : false;
@@ -177,7 +208,34 @@ static void path_header_loader(std::ostream& stream, const std::string&, const s
 {
     constexpr int C = 1 /* MIS */ + 3 /* Contrib */ + 1 /* Depth */ + 1 /* Eta */;
     stream << "static RayPayloadComponents = " << C << ";" << std::endl
-           << "fn init_raypayload() = wrap_ptraypayload(PTRayPayload { mis = 0, contrib = white, depth = 1, eta = 1 });" << std::endl;
+           << "fn init_raypayload() = wrap_ptraypayload(PTRayPayload { mis = 0, contrib = color_builtins::white, depth = 1, eta = 1 });" << std::endl;
+}
+
+/////////////////////////
+
+static TechniqueInfo volpath_get_info(const std::string&, const std::shared_ptr<Parser::Object>&, const LoaderContext&)
+{
+    TechniqueInfo info;
+    info.Variants[0].UsesLights = true;
+    info.Variants[0].UsesMedia  = true;
+
+    return info;
+}
+
+static void volpath_body_loader(std::ostream& stream, const std::string&, const std::shared_ptr<Parser::Object>& technique, const LoaderContext&)
+{
+    const int max_depth     = technique ? technique->property("max_depth").getInteger(64) : 64;
+    const float clamp_value = technique ? technique->property("clamp").getNumber(0) : 0; // Allow clamping of contributions
+
+    stream << "  let aovs = @|_id:i32| make_empty_aov_image();" << std::endl;
+    stream << "  let technique = make_volume_path_renderer(" << max_depth << ", num_lights, lights, media, aovs, " << clamp_value << ");" << std::endl;
+}
+
+static void volpath_header_loader(std::ostream& stream, const std::string&, const std::shared_ptr<Parser::Object>&, const LoaderContext&)
+{
+    constexpr int C = 1 /* MIS */ + 3 /* Contrib */ + 1 /* Depth */ + 1 /* Eta */ + 1 /* Medium */;
+    stream << "static RayPayloadComponents = " << C << ";" << std::endl
+           << "fn init_raypayload() = wrap_vptraypayload(VPTRayPayload { mis = 0, contrib = color_builtins::white, depth = 1, eta = 1, medium = -1 });" << std::endl;
 }
 
 /////////////////////////////////
@@ -241,14 +299,11 @@ static TechniqueInfo ppm_get_info(const std::string&, const std::shared_ptr<Pars
     info.Variants[0].CallbackGenerators[(int)CallbackType::BeforeIteration] = ppm_before_iteration_generator; // Reset light cache
     info.Variants[1].CallbackGenerators[(int)CallbackType::BeforeIteration] = ppm_before_iteration_generator; // Construct query structure
 
-    // The standard approach is first LT, then PT, repeat
-    static auto variantSelector = [](uint32 iter) { return iter % 2; };
-    info.VariantSelector        = variantSelector;
-
     // The LT works independent of the framebuffer and requires a different work size
     const int max_photons           = technique ? technique->property("photons").getInteger(1000000) : 1000000;
     info.Variants[0].OverrideWidth  = max_photons; // Photon count
     info.Variants[0].OverrideHeight = 1;
+    info.Variants[0].OverrideSPI    = 1; // The light tracer variant is always just one spi (Could be improved in the future though)
 
     info.Variants[0].LockFramebuffer = true; // We do not change the framebuffer
 
@@ -256,8 +311,8 @@ static TechniqueInfo ppm_get_info(const std::string&, const std::shared_ptr<Pars
     // It is totally fine to only define the type by other means then the scene config
     if (technique) {
         if (technique->property("aov").getBool(false)) {
-            info.EnabledAOVs.push_back("Direct Weights");
-            info.EnabledAOVs.push_back("Merging Weights");
+            info.EnabledAOVs.emplace_back("Direct Weights");
+            info.EnabledAOVs.emplace_back("Merging Weights");
         }
     }
 
@@ -266,9 +321,10 @@ static TechniqueInfo ppm_get_info(const std::string&, const std::shared_ptr<Pars
 
 static void ppm_body_loader(std::ostream& stream, const std::string&, const std::shared_ptr<Parser::Object>& technique, const LoaderContext& ctx)
 {
-    const int max_depth = technique ? technique->property("max_depth").getInteger(8) : 8;
-    const float radius  = technique ? technique->property("radius").getNumber(0.01f) : 0.01f; // It is better to base it on some automatic metric
-    bool is_lighttracer = ctx.CurrentTechniqueVariant == 0;
+    const int max_depth     = technique ? technique->property("max_depth").getInteger(8) : 8;
+    const float radius      = technique ? technique->property("radius").getNumber(0.01f) : 0.01f;
+    const float clamp_value = technique ? technique->property("clamp").getNumber(0) : 0; // Allow clamping of contributions
+    bool is_lighttracer     = ctx.CurrentTechniqueVariant == 0;
 
     if (is_lighttracer) {
         stream << "  let aovs = @|id:i32| -> AOVImage {" << std::endl
@@ -279,10 +335,9 @@ static void ppm_body_loader(std::ostream& stream, const std::string&, const std:
     } else {
         const bool hasAOV = technique ? technique->property("aov").getBool(false) : false;
 
-        size_t counter = 1;
         if (hasAOV) {
-            stream << "  let aov_di   = device.load_aov_image(" << counter++ << ", spp);" << std::endl;
-            stream << "  let aov_merg = device.load_aov_image(" << counter++ << ", spp);" << std::endl;
+            stream << "  let aov_di   = device.load_aov_image(1, spp);" << std::endl;
+            stream << "  let aov_merg = device.load_aov_image(2, spp);" << std::endl;
         }
 
         stream << "  let aovs = @|id:i32| -> AOVImage {" << std::endl
@@ -306,19 +361,20 @@ static void ppm_body_loader(std::ostream& stream, const std::string&, const std:
     if (is_lighttracer)
         stream << "  let technique = make_ppm_light_renderer(" << max_depth << ", aovs, light_cache);" << std::endl;
     else
-        stream << "  let technique = make_ppm_path_renderer(" << max_depth << ", num_lights, lights, ppm_radius, aovs, light_cache);" << std::endl;
+        stream << "  let technique = make_ppm_path_renderer(" << max_depth << ", num_lights, lights, ppm_radius, aovs, " << clamp_value << ", light_cache);" << std::endl;
 }
 
-static void ppm_header_loader(std::ostream& stream, const std::string&, const std::shared_ptr<Parser::Object>& technique, const LoaderContext& ctx)
+static void ppm_header_loader(std::ostream& stream, const std::string&, const std::shared_ptr<Parser::Object>& technique, const LoaderContext&)
 {
-    constexpr int C                   = 3 /* Contrib */ + 1 /* Depth */ + 1 /* Eta */ + 1 /* Light/Radius */;
-    const size_t max_photons          = std::max(100, technique ? technique->property("photons").getInteger(1000000) : 1000000);
-    const size_t max_photons_per_iter = max_photons * ctx.SamplesPerIteration; // This can be very large
+    constexpr int C          = 3 /* Contrib */ + 1 /* Depth */ + 1 /* Eta */ + 1 /* Light/Radius */ + 1 /* PathType */;
+    const size_t max_photons = std::max(100, technique ? technique->property("photons").getInteger(1000000) : 1000000);
 
     stream << "static RayPayloadComponents = " << C << ";" << std::endl
-           << "fn init_raypayload() = wrap_ppmraypayload(PPMRayPayload { contrib = white, depth = 1, eta = 1, radius_or_light = 0 });" << std::endl
-           << "static PPMPhotonCount = " << max_photons_per_iter << ":i32;" << std::endl;
+           << "fn init_raypayload() = init_ppm_raypayload();" << std::endl
+           << "static PPMPhotonCount = " << max_photons << ":i32;" << std::endl;
 }
+
+/////////////////////////////////
 
 // Will return information about the enabled AOVs
 using TechniqueGetInfo = TechniqueInfo (*)(const std::string&, const std::shared_ptr<Parser::Object>&, const LoaderContext&);
@@ -329,7 +385,7 @@ using TechniqueBodyLoader = void (*)(std::ostream&, const std::string&, const st
 // Every header loader has to define 'RayPayloadComponents' and 'init_raypayload()'
 using TechniqueHeaderLoader = void (*)(std::ostream&, const std::string&, const std::shared_ptr<Parser::Object>&, const LoaderContext&);
 
-static struct TechniqueEntry {
+static const struct TechniqueEntry {
     const char* Name;
     TechniqueGetInfo GetInfo;
     TechniqueBodyLoader BodyLoader;
@@ -337,19 +393,20 @@ static struct TechniqueEntry {
 } _generators[] = {
     { "ao", technique_empty_get_info, ao_body_loader, technique_empty_header_loader },
     { "path", path_get_info, path_body_loader, path_header_loader },
-    { "debug", technique_empty_get_info, debug_body_loader, technique_empty_header_loader },
     { "bi", bi_get_info, bi_body_loader, technique_empty_header_loader},
+    { "volpath", volpath_get_info, volpath_body_loader, volpath_header_loader },
+    { "debug", debug_get_info, debug_body_loader, technique_empty_header_loader },
     { "ppm", ppm_get_info, ppm_body_loader, ppm_header_loader },
     { "photonmapper", ppm_get_info, ppm_body_loader, ppm_header_loader },
+    { "wireframe", wireframe_get_info, wireframe_body_loader, wireframe_header_loader },
     { "", nullptr, nullptr, nullptr }
 };
 
-static TechniqueEntry* getTechniqueEntry(const std::string& name)
+static const TechniqueEntry* getTechniqueEntry(const std::string& name)
 {
-    std::string tmp = name;
-    std::transform(tmp.begin(), tmp.end(), tmp.begin(), ::tolower);
+    const std::string lower_name = to_lowercase(name);
     for (size_t i = 0; _generators[i].HeaderLoader; ++i) {
-        if (_generators[i].Name == tmp)
+        if (_generators[i].Name == lower_name)
             return &_generators[i];
     }
     IG_LOG(L_ERROR) << "No technique type '" << name << "' available" << std::endl;
@@ -395,5 +452,16 @@ std::string LoaderTechnique::generateHeader(const LoaderContext& ctx, bool isRay
     entry->HeaderLoader(stream, ctx.TechniqueType, technique, ctx);
 
     return stream.str();
+}
+
+std::vector<std::string> LoaderTechnique::getAvailableTypes()
+{
+    std::vector<std::string> array;
+
+    for (size_t i = 0; _generators[i].HeaderLoader; ++i)
+        array.emplace_back(_generators[i].Name);
+
+    std::sort(array.begin(), array.end());
+    return array;
 }
 } // namespace IG

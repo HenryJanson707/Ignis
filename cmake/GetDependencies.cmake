@@ -29,13 +29,6 @@ CPMAddPackage(
 )
 
 CPMAddPackage(
-    NAME hwinfo
-    GITHUB_REPOSITORY PearCoding/hwinfo 
-    GIT_TAG main
-    EXCLUDE_FROM_ALL
-)
-
-CPMAddPackage(
     NAME tinyexr
     GITHUB_REPOSITORY syoyo/tinyexr 
     GIT_TAG master
@@ -61,4 +54,11 @@ CPMAddPackage(
     GITHUB_REPOSITORY madmann91/bvh
     GIT_TAG master
     DOWNLOAD_ONLY YES
+)
+
+CPMAddPackage(
+    NAME pexpr
+    GITHUB_REPOSITORY PearCoding/PExpr 
+    GIT_TAG master
+    EXCLUDE_FROM_ALL
 )

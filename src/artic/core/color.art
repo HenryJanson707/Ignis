@@ -20,24 +20,86 @@ fn @color_lerp(a: Color, b: Color, t: f32) = make_color(
     (1 - t) * a.b + t * b.b,
     (1 - t) * a.a + t * b.a);
 
+fn @color_abs(a: Color)              = make_color(math_builtins::fabs(a.r), math_builtins::fabs(a.g), math_builtins::fabs(a.b), math_builtins::fabs(a.a));
+fn @color_saturate(a: Color, f: f32) = make_color(math_builtins::fmin[f32](a.r, f), math_builtins::fmin[f32](a.g, f), math_builtins::fmin[f32](a.b, f), math_builtins::fmin[f32](a.a, f));
+
 fn @color_average(c: Color)       = (c.r + c.g + c.b) / 3;
 fn @color_luminance(c: Color)     = c.r * 0.2126 + c.g * 0.7152 + c.b * 0.0722;
 fn @color_max_component(c: Color) = math_builtins::fmax[f32](c.r, math_builtins::fmax[f32](c.g, c.b));
 
 fn @is_black(c: Color) = (c.r == 0 && c.g == 0 && c.b == 0);
+fn @is_black_eps(c: Color, eps: f32) -> bool {
+    let diff = color_abs(c);
+    diff.r <= eps && diff.g <= eps && diff.b <= eps
+}
 
 fn @vec3_to_color(v: Vec3)  = make_color(v.x, v.y, v.z, 1);
 fn @vec4_to_color(v: Vec4)  = make_color(v.x, v.y, v.z, v.w);
 fn @color_to_vec3(c: Color) = make_vec3(c.r, c.g, c.b);
 fn @color_to_vec4(c: Color) = make_vec4(c.r, c.g, c.b, c.a);
 
-static black   = Color { r = 0, g = 0, b = 0, a = 1 };
-static white   = Color { r = 1, g = 1, b = 1, a = 1 };
-static pink    = Color { r = 1, g = 0, b = 1, a = 1 }; 
-static red     = Color { r = 1, g = 0, b = 0, a = 1 }; 
-static green   = Color { r = 0, g = 1, b = 0, a = 1 }; 
-static blue    = Color { r = 0, g = 0, b = 1, a = 1 }; 
-static yellow  = Color { r = 1, g = 1, b = 0, a = 1 }; 
-static magenta = Color { r = 1, g = 0, b = 1, a = 1 };
-static cyan    = Color { r = 0, g = 1, b = 1, a = 1 };  
-static orange  = Color { r = 1, g = 0.5, b = 0, a = 1 }; 
+fn @color_at(a: Color, i: i32) = vec4_at(color_to_vec4(a), i);
+
+mod color_builtins {
+static black   = super::Color { r = 0, g = 0, b = 0, a = 1 };
+static white   = super::Color { r = 1, g = 1, b = 1, a = 1 };
+static pink    = super::Color { r = 1, g = 0, b = 1, a = 1 }; 
+static red     = super::Color { r = 1, g = 0, b = 0, a = 1 }; 
+static green   = super::Color { r = 0, g = 1, b = 0, a = 1 }; 
+static blue    = super::Color { r = 0, g = 0, b = 1, a = 1 }; 
+static yellow  = super::Color { r = 1, g = 1, b = 0, a = 1 }; 
+static magenta = super::Color { r = 1, g = 0, b = 1, a = 1 };
+static cyan    = super::Color { r = 0, g = 1, b = 1, a = 1 };  
+static orange  = super::Color { r = 1, g = 0.5, b = 0, a = 1 }; 
+}
+
+fn @xyz_to_srgb(c : Color) -> Color {
+    make_color( 3.2404542 * c.r - 1.5371385 * c.g - 0.4985314 * c.b,
+               -0.9692660 * c.r + 1.8760108 * c.g + 0.0415560 * c.b,
+                0.0556434 * c.r - 0.2040259 * c.g + 1.0572252 * c.b,
+                c.a)
+}
+
+fn @srgb_to_xyz(c : Color) -> Color {
+    make_color(0.4124564 * c.r + 0.3575761 * c.g + 0.1804375 * c.b,
+               0.2126729 * c.r + 0.7151522 * c.g + 0.0721750 * c.b,
+               0.0193339 * c.r + 0.1191920 * c.g + 0.9503041 * c.b,
+               c.a)
+}
+
+fn @xyY_to_srgb(c : Color) -> Color {
+    if c.g <= flt_eps { color_builtins::black } else { xyz_to_srgb(make_color(c.r * c.b / c.g, c.b, (1 - c.r - c.g) * c.b / c.g, c.a)) }
+}
+
+fn @srgb_to_xyY(c : Color) -> Color {
+    let s = srgb_to_xyz(c);
+    let n = s.r + s.g + s.b;
+    if n <= flt_eps { color_builtins::black } else { make_color(s.r / n, s.g / n, s.g, 1) }
+}
+
+fn @reinhard(L : f32) -> f32 {
+    safe_div(L, 1.0 + L)
+}
+
+fn @reinhard_modified(L : f32) -> f32 {
+    let WhitePoint = 4 : f32;
+    safe_div(L * (1.0 + L / (WhitePoint * WhitePoint)), 1.0 + L)
+}
+
+// Narkowicz 2015, "ACES Filmic Tone Mapping Curve"
+fn @aces(L: f32) -> f32 {
+    let a = 2.51 : f32;
+    let b = 0.03 : f32;
+    let c = 2.43 : f32;
+    let d = 0.59 : f32;
+    let e = 0.14 : f32;
+    safe_div(L * (a * L + b), L * (c * L + d) + e)
+}
+
+fn @srgb_gamma(x : f32) -> f32 {
+    if x <= 0.0031308 {
+        12.92 * x
+    } else {
+        1.055 * math_builtins::pow[f32](x, 0.416666667) - 0.055
+    }
+}

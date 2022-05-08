@@ -1,7 +1,5 @@
 #include "Runtime.h"
-#include "Camera.h"
 #include "Logger.h"
-#include "jit.h"
 #include "loader/Parser.h"
 
 #include <chrono>
@@ -24,15 +22,18 @@ static inline void setup_technique(LoaderOptions& lopts, const RuntimeOptions& o
     lopts.TechniqueType = tech_type;
 }
 
-static inline void setup_film(RuntimeRenderSettings& settings, const LoaderOptions& lopts, const RuntimeOptions& opts)
+static inline void setup_film(LoaderOptions& lopts, const RuntimeOptions& opts)
 {
-    Vector2f filmSize = Vector2f(settings.FilmWidth, settings.FilmHeight);
+    Vector2f filmSize = Vector2f(800, 600);
     const auto film   = lopts.Scene.film();
     if (film)
         filmSize = film->property("size").getVector2(filmSize);
 
-    settings.FilmWidth  = opts.OverrideFilmSize.first > 0 ? opts.OverrideFilmSize.first : filmSize.x();
-    settings.FilmHeight = opts.OverrideFilmSize.second > 0 ? opts.OverrideFilmSize.second : filmSize.y();
+    lopts.FilmWidth  = opts.OverrideFilmSize.first > 0 ? (int)opts.OverrideFilmSize.first : (int)filmSize.x();
+    lopts.FilmHeight = opts.OverrideFilmSize.second > 0 ? (int)opts.OverrideFilmSize.second : (int)filmSize.y();
+
+    lopts.FilmWidth  = std::max<size_t>(1, lopts.FilmWidth);
+    lopts.FilmHeight = std::max<size_t>(1, lopts.FilmHeight);
 }
 
 static inline void setup_camera(LoaderOptions& lopts, const RuntimeOptions& opts)
@@ -50,48 +51,14 @@ static inline void setup_camera(LoaderOptions& lopts, const RuntimeOptions& opts
     lopts.CameraType = camera_type;
 }
 
-static inline void setup_camera_view(RuntimeRenderSettings& settings, const LoaderOptions& lopts, const BoundingBox& sceneBBox)
+static inline size_t recommendSPI(Target target, size_t width, size_t height, bool interactive)
 {
-    if (!lopts.Scene.camera()) {
-        // If no camera information is given whatsoever, try to setup a view over the whole scene
-        const float aspect_ratio = settings.FilmWidth / settings.FilmHeight;
-        const float a            = sceneBBox.diameter().x() / 2;
-        const float b            = sceneBBox.diameter().y() / (2 * aspect_ratio);
-        const float s            = std::sin(settings.FOV * Deg2Rad / 2);
-        const float d            = std::max(a, b) * std::sqrt(1 / (s * s) - 1);
-
-        settings.CameraDir = -Vector3f::UnitZ();
-        settings.CameraUp  = Vector3f::UnitY();
-        settings.CameraEye = Vector3f::UnitX() * sceneBBox.center().x()
-                             + Vector3f::UnitY() * sceneBBox.center().y()
-                             + Vector3f::UnitZ() * (sceneBBox.max.z() + d);
-    } else {
-        // Get initial location
-        Transformf cameraTransform = Transformf::Identity();
-        const auto camera          = lopts.Scene.camera();
-        if (camera) {
-            cameraTransform = camera->property("transform").getTransform();
-            settings.FOV    = camera->property("fov").getNumber(settings.FOV);
-
-            settings.TMin = camera->property("near_clip").getNumber(settings.TMin);
-            settings.TMax = camera->property("far_clip").getNumber(settings.TMax);
-        }
-
-        settings.CameraEye = cameraTransform * Vector3f::Zero();
-        settings.CameraDir = cameraTransform.linear().col(2);
-        settings.CameraUp  = cameraTransform.linear().col(1);
-
-        if (settings.TMax < settings.TMin)
-            std::swap(settings.TMin, settings.TMax);
-    }
-}
-
-static inline size_t recommendSPI(Target target)
-{
-    if (isCPU(target))
-        return 2;
-    else
-        return 8;
+    // The "best" case was measured with a 1000 x 1000. It does depend on the scene content though, but thats ignored here
+    size_t spi_f = isCPU(target) ? 2 : 8;
+    if (interactive)
+        spi_f /= 2;
+    const size_t spi = (size_t)std::ceil(spi_f / ((width / 1000.0f) * (height / 1000.0f)));
+    return std::max<size_t>(1, std::min<size_t>(64, spi));
 }
 
 static inline void dumpShader(const std::string& filename, const std::string& shader)
@@ -100,19 +67,28 @@ static inline void dumpShader(const std::string& filename, const std::string& sh
     stream << shader;
 }
 
-Runtime::Runtime(const std::filesystem::path& path, const RuntimeOptions& opts)
-    : mInit(false)
-    , mOptions(opts)
+Runtime::Runtime(const RuntimeOptions& opts)
+    : mOptions(opts)
+    , mDatabase()
+    , mLoadedInterface()
+    , mManager()
+    , mParameterSet()
     , mDevice(opts.Device)
+    , mSamplesPerIteration(0)
+    , mTarget(Target::INVALID)
     , mCurrentIteration(0)
-    , mCurrentIterationFramebuffer(0)
-    , mCurrentTechniqueVariant(0)
-    , mIsTrace(false)
-    , mIsDebug(false)
-    , mDebugMode(DebugMode::Normal)
+    , mCurrentSampleCount(0)
+    , mCurrentFrame(0)
+    , mFilmWidth(0)
+    , mFilmHeight(0)
+    , mInitialCameraOrientation()
     , mAcquireStats(opts.AcquireStats)
+    , mTechniqueName()
+    , mTechniqueInfo()
+    , mTechniqueVariants()
+    , mTechniqueVariantShaderSets()
 {
-    if (!mManager.init())
+    if (!mManager.init(opts.ModulePath))
         throw std::runtime_error("Could not init modules!");
 
     // Recommend a target based on the loaded drivers
@@ -126,88 +102,24 @@ Runtime::Runtime(const std::filesystem::path& path, const RuntimeOptions& opts)
             target = mManager.recommendTarget();
     }
 
-    LoaderOptions lopts;
-    lopts.FilePath = path;
-    lopts.Target   = target;
-
-    // Parse scene file
-    IG_LOG(L_DEBUG) << "Parsing scene" << std::endl;
-    const auto startParser = std::chrono::high_resolution_clock::now();
-    Parser::SceneParser parser;
-    bool ok     = false;
-    lopts.Scene = parser.loadFromFile(path, ok);
-    if (!ok)
-        throw std::runtime_error("Could not parse scene!");
-    IG_LOG(L_DEBUG) << "Parsing scene took " << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - startParser).count() / 1000.0f << " seconds" << std::endl;
-
-    // Extract technique
-    setup_technique(lopts, opts);
-
-    // Extract film
-    setup_film(mLoadedRenderSettings, lopts, opts);
-
-    // Extract camera
-    setup_camera(lopts, opts);
-
     // Check configuration
-    const Target newTarget = mManager.resolveTarget(lopts.Target);
-    if (newTarget != lopts.Target) {
+    const Target newTarget = mManager.resolveTarget(target);
+    if (newTarget != target) {
         IG_LOG(L_WARNING) << "Switched from "
-                          << targetToString(lopts.Target) << " to "
+                          << targetToString(target) << " to "
                           << targetToString(newTarget) << std::endl;
     }
     mTarget = newTarget;
 
-    IG_LOG(L_INFO) << "Loading target " << targetToString(newTarget) << std::endl;
-    if (!mManager.load(newTarget, mLoadedInterface))
+    // Load interface
+    IG_LOG(L_INFO) << "Loading target " << targetToString(mTarget) << std::endl;
+    if (!mManager.load(mTarget, mLoadedInterface))
         throw std::runtime_error("Error loading interface!");
 
-    if (opts.SPI == 0)
-        mSamplesPerIteration = recommendSPI(mTarget);
-    else
-        mSamplesPerIteration = opts.SPI;
-
-    lopts.Target              = mTarget;
-    lopts.SamplesPerIteration = mSamplesPerIteration;
-    IG_LOG(L_DEBUG) << "Samples per iteration = " << mSamplesPerIteration << std::endl;
-
-    IG_LOG(L_DEBUG) << "Loading scene" << std::endl;
-    LoaderResult result;
-    if (!Loader::load(lopts, result))
-        throw std::runtime_error("Could not load scene!");
-    mDatabase = std::move(result.Database);
-
-    // Pickup initial camera view
-    setup_camera_view(mLoadedRenderSettings, lopts, mDatabase.SceneBBox);
-
-    mIsDebug = lopts.TechniqueType == "debug";
-    mIsTrace = lopts.CameraType == "list";
-    mAOVs    = std::move(result.AOVs);
-
-    mTechniqueVariants        = std::move(result.TechniqueVariants);
-    mTechniqueVariantSelector = result.VariantSelector;
-
-    if (opts.DumpShader) {
-        for (size_t i = 0; i < mTechniqueVariants.size(); ++i) {
-            const auto& variant = mTechniqueVariants[i];
-            dumpShader("v" + std::to_string(i) + "_rayGeneration.art", variant.RayGenerationShader);
-            dumpShader("v" + std::to_string(i) + "_missShader.art", variant.MissShader);
-
-            int counter = 0;
-            for (const auto& shader : variant.HitShaders) {
-                dumpShader("v" + std::to_string(i) + "_hitShader" + std::to_string(counter++) + ".art", shader);
-            }
-
-            if (!variant.AdvancedShadowHitShader.empty()) {
-                dumpShader("v" + std::to_string(i) + "_advancedShadowHit.art", variant.AdvancedShadowHitShader);
-                dumpShader("v" + std::to_string(i) + "_advancedShadowMiss.art", variant.AdvancedShadowMissShader);
-            }
-
-            for (size_t i = 0; i < variant.CallbackShaders.size(); ++i) {
-                if (!variant.CallbackShaders[i].empty())
-                    dumpShader("v" + std::to_string(i) + "_callback" + std::to_string(i) + ".art", variant.CallbackShaders[i]);
-            }
-        }
+    // Load standard library if necessary
+    if (!mOptions.ScriptDir.empty()) {
+        IG_LOG(L_INFO) << "Loading standard library from " << mOptions.ScriptDir << std::endl;
+        mScriptPreprocessor.loadStdLibFromDirectory(mOptions.ScriptDir);
     }
 
     // Force flush to zero mode for denormals
@@ -218,70 +130,156 @@ Runtime::Runtime(const std::filesystem::path& path, const RuntimeOptions& opts)
 
 Runtime::~Runtime()
 {
-    if (mInit)
+    if (!mTechniqueVariants.empty())
         shutdown();
 }
 
-void Runtime::step(const Camera& camera)
+bool Runtime::loadFromFile(const std::filesystem::path& path)
 {
-    if (!mInit) {
-        setup();
-    }
+    // Parse scene file
+    IG_LOG(L_DEBUG) << "Parsing scene file" << std::endl;
+    const auto startParser = std::chrono::high_resolution_clock::now();
+    Parser::SceneParser parser;
+    bool ok    = false;
+    auto scene = parser.loadFromFile(path, ok);
+    IG_LOG(L_DEBUG) << "Parsing scene took " << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - startParser).count() / 1000.0f << " seconds" << std::endl;
+    if (!ok)
+        return false;
 
-    if (mIsTrace) {
+    if (mOptions.AddExtraEnvLight)
+        scene.addConstantEnvLight();
+
+    return load(path, std::move(scene));
+}
+
+bool Runtime::loadFromString(const std::string& str)
+{
+    // Parse scene string
+    IG_LOG(L_DEBUG) << "Parsing scene string" << std::endl;
+    const auto startParser = std::chrono::high_resolution_clock::now();
+    Parser::SceneParser parser;
+    bool ok    = false;
+    auto scene = parser.loadFromString(str, ok);
+    IG_LOG(L_DEBUG) << "Parsing scene took " << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - startParser).count() / 1000.0f << " seconds" << std::endl;
+    if (!ok)
+        return false;
+
+    if (mOptions.AddExtraEnvLight)
+        scene.addConstantEnvLight();
+
+    return load({}, std::move(scene));
+}
+
+bool Runtime::load(const std::filesystem::path& path, Parser::Scene&& scene)
+{
+    LoaderOptions lopts;
+    lopts.FilePath = path;
+    lopts.Target   = mTarget;
+    lopts.IsTracer = mOptions.IsTracer;
+    lopts.Scene    = std::move(scene);
+
+    // Extract technique
+    setup_technique(lopts, mOptions);
+
+    // Extract film
+    setup_film(lopts, mOptions);
+    mFilmWidth  = lopts.FilmWidth;
+    mFilmHeight = lopts.FilmHeight;
+
+    // Extract camera
+    setup_camera(lopts, mOptions);
+
+    if (mOptions.SPI == 0)
+        mSamplesPerIteration = recommendSPI(mTarget, mFilmWidth, mFilmHeight, mOptions.IsInteractive);
+    else
+        mSamplesPerIteration = mOptions.SPI;
+
+    lopts.SamplesPerIteration = mSamplesPerIteration;
+    IG_LOG(L_DEBUG) << "Recommended samples per iteration = " << mSamplesPerIteration << std::endl;
+
+    IG_LOG(L_DEBUG) << "Loading scene" << std::endl;
+    const auto startLoader = std::chrono::high_resolution_clock::now();
+    LoaderResult result;
+    if (!Loader::load(lopts, result))
+        return false;
+    mDatabase = std::move(result.Database);
+    IG_LOG(L_DEBUG) << "Loading scene took " << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - startLoader).count() / 1000.0f << " seconds" << std::endl;
+
+    mTechniqueName            = lopts.TechniqueType;
+    mTechniqueInfo            = result.TechniqueInfo;
+    mInitialCameraOrientation = result.CameraOrientation;
+    mTechniqueVariants        = std::move(result.TechniqueVariants);
+
+    return setup();
+}
+
+void Runtime::step()
+{
+    if (IG_UNLIKELY(mOptions.IsTracer)) {
         IG_LOG(L_ERROR) << "Trying to use step() in a trace driver!" << std::endl;
         return;
     }
 
-    handleTechniqueVariants(mCurrentIteration);
+    if (mTechniqueVariants.empty()) {
+        IG_LOG(L_ERROR) << "No scene loaded!" << std::endl;
+        return;
+    }
+
+    if (mTechniqueInfo.VariantSelector) {
+        const auto& active = mTechniqueInfo.VariantSelector(mCurrentIteration);
+        for (const auto& ind : active)
+            stepVariant(ind);
+    } else {
+        for (size_t i = 0; i < mTechniqueVariants.size(); ++i)
+            stepVariant((int)i);
+    }
+
+    ++mCurrentIteration;
+}
+
+void Runtime::stepVariant(size_t variant)
+{
+    IG_ASSERT(variant < mTechniqueVariants.size(), "Expected technique variant to be well selected");
+    const auto& info = mTechniqueInfo.Variants[variant];
+
+    // IG_LOG(L_DEBUG) << "Rendering iteration " << mCurrentIteration << ", variant " << variant << std::endl;
 
     DriverRenderSettings settings;
-    for (int i = 0; i < 3; ++i)
-        settings.eye[i] = camera.Eye(i);
-    for (int i = 0; i < 3; ++i)
-        settings.dir[i] = camera.Direction(i);
-    for (int i = 0; i < 3; ++i)
-        settings.up[i] = camera.Up(i);
-    for (int i = 0; i < 3; ++i)
-        settings.right[i] = camera.Right(i);
-    settings.width      = camera.SensorWidth;
-    settings.height     = camera.SensorHeight;
-    settings.tmin       = camera.TMin;
-    settings.tmax       = camera.TMax;
-    settings.rays       = nullptr; // No artifical ray streams
-    settings.device     = mDevice;
-    settings.spi        = mSamplesPerIteration;
-    settings.debug_mode = (uint32)mDebugMode;
+    settings.rays               = nullptr; // No artifical ray streams
+    settings.device             = mDevice;
+    settings.spi                = info.GetSPI(mSamplesPerIteration);
+    settings.work_width         = info.GetWidth(mFilmWidth);
+    settings.work_height        = info.GetHeight(mFilmHeight);
+    settings.framebuffer_locked = info.LockFramebuffer;
 
-    mLoadedInterface.RenderFunction(&settings, mCurrentIteration++);
-    if (!mTechniqueVariants[mCurrentTechniqueVariant].LockFramebuffer)
-        ++mCurrentIterationFramebuffer;
+    mLoadedInterface.RenderFunction(mTechniqueVariantShaderSets[variant], settings, &mParameterSet, mCurrentIteration, mCurrentFrame);
+
+    if (!info.LockFramebuffer)
+        mCurrentSampleCount += settings.spi;
 }
 
 void Runtime::trace(const std::vector<Ray>& rays, std::vector<float>& data)
 {
-    if (!mInit) {
-        setup();
-    }
-
-    if (!mIsTrace) {
+    if (IG_UNLIKELY(!mOptions.IsTracer)) {
         IG_LOG(L_ERROR) << "Trying to use trace() in a camera driver!" << std::endl;
         return;
     }
 
-    handleTechniqueVariants(mCurrentIteration);
+    if (mTechniqueVariants.empty()) {
+        IG_LOG(L_ERROR) << "No scene loaded!" << std::endl;
+        return;
+    }
 
-    DriverRenderSettings settings;
-    settings.width  = rays.size();
-    settings.height = 1;
-    settings.rays   = rays.data();
-    settings.device = mDevice;
-    settings.spi    = mSamplesPerIteration;
+    if (mTechniqueInfo.VariantSelector) {
+        const auto& active = mTechniqueInfo.VariantSelector(mCurrentIteration);
+        for (const auto& ind : active)
+            traceVariant(rays, ind);
+    } else {
+        for (size_t i = 0; i < mTechniqueVariants.size(); ++i)
+            traceVariant(rays, i);
+    }
 
-    mLoadedInterface.RenderFunction(&settings, mCurrentIteration++);
-
-    if (!mTechniqueVariants[mCurrentTechniqueVariant].LockFramebuffer)
-        ++mCurrentIterationFramebuffer;
+    ++mCurrentIteration;
 
     // Get result
     const float* data_ptr = getFramebuffer(0);
@@ -289,20 +287,56 @@ void Runtime::trace(const std::vector<Ray>& rays, std::vector<float>& data)
     std::memcpy(data.data(), data_ptr, sizeof(float) * rays.size() * 3);
 }
 
-const float* Runtime::getFramebuffer(int aov) const
+void Runtime::traceVariant(const std::vector<Ray>& rays, size_t variant)
+{
+    IG_ASSERT(variant < mTechniqueVariants.size(), "Expected technique variant to be well selected");
+    const auto& info = mTechniqueInfo.Variants[variant];
+
+    // IG_LOG(L_DEBUG) << "Tracing iteration " << mCurrentIteration << ", variant " << variant << std::endl;
+
+    DriverRenderSettings settings;
+    settings.rays               = rays.data();
+    settings.device             = mDevice;
+    settings.spi                = info.GetSPI(mSamplesPerIteration);
+    settings.work_width         = rays.size();
+    settings.work_height        = 1;
+    settings.framebuffer_locked = info.LockFramebuffer;
+
+    mLoadedInterface.RenderFunction(mTechniqueVariantShaderSets[variant], settings, &mParameterSet, mCurrentIteration, mCurrentFrame);
+
+    if (!info.LockFramebuffer)
+        mCurrentSampleCount += settings.spi;
+}
+
+void Runtime::resizeFramebuffer(size_t width, size_t height)
+{
+    mFilmWidth  = width;
+    mFilmHeight = height;
+    mLoadedInterface.ResizeFramebufferFunction(width, height);
+    reset();
+}
+
+const float* Runtime::getFramebuffer(size_t aov) const
 {
     return mLoadedInterface.GetFramebufferFunction(aov);
 }
 
-void Runtime::clearFramebuffer(int aov)
+void Runtime::clearFramebuffer()
 {
-    return mLoadedInterface.ClearFramebufferFunction(aov);
+    return mLoadedInterface.ClearFramebufferFunction(-1);
 }
 
-void Runtime::reset() {
+void Runtime::clearFramebuffer(size_t aov)
+{
+    return mLoadedInterface.ClearFramebufferFunction((int)aov);
+}
+
+void Runtime::reset()
+{
     clearFramebuffer();
-    mCurrentIteration = 0;
-    mCurrentIterationFramebuffer = 0;
+    mCurrentIteration   = 0;
+    mCurrentSampleCount = 0;
+    // No mCurrentFrameCount
 }
 
 const Statistics* Runtime::getStatistics() const
@@ -310,25 +344,28 @@ const Statistics* Runtime::getStatistics() const
     return mAcquireStats ? mLoadedInterface.GetStatisticsFunction() : nullptr;
 }
 
-void Runtime::setup()
+bool Runtime::setup()
 {
+    const std::string driver_filename = mManager.getPath(mTarget).generic_u8string();
+
     DriverSetupSettings settings;
+    settings.driver_filename    = driver_filename.c_str();
     settings.database           = &mDatabase;
-    settings.framebuffer_width  = std::max(1u, mLoadedRenderSettings.FilmWidth);
-    settings.framebuffer_height = std::max(1u, mLoadedRenderSettings.FilmHeight);
+    settings.framebuffer_width  = (uint32)mFilmWidth;
+    settings.framebuffer_height = (uint32)mFilmHeight;
     settings.acquire_stats      = mAcquireStats;
-    settings.aov_count          = mAOVs.size();
+    settings.aov_count          = mTechniqueInfo.EnabledAOVs.size();
 
     settings.logger = &IG_LOGGER;
 
-    IG_LOG(L_DEBUG) << "Init JIT compiling" << std::endl;
-    ig_init_jit(mManager.getPath(mTarget).generic_u8string());
-    mLoadedInterface.SetupFunction(&settings);
+    IG_LOG(L_DEBUG) << "Init driver" << std::endl;
+    mLoadedInterface.SetupFunction(settings);
 
-    compileShaders();
-    mInit = true;
+    if (!compileShaders())
+        return false;
 
     clearFramebuffer();
+    return true;
 }
 
 void Runtime::shutdown()
@@ -336,66 +373,134 @@ void Runtime::shutdown()
     mLoadedInterface.ShutdownFunction();
 }
 
-void Runtime::compileShaders()
+bool Runtime::compileShaders()
 {
+    const auto startJIT = std::chrono::high_resolution_clock::now();
     mTechniqueVariantShaderSets.resize(mTechniqueVariants.size());
     for (size_t i = 0; i < mTechniqueVariants.size(); ++i) {
         const auto& variant = mTechniqueVariants[i];
         auto& shaders       = mTechniqueVariantShaderSets[i];
 
-        shaders.Width           = variant.Width;
-        shaders.Height          = variant.Height;
-        shaders.LockFramebuffer = variant.LockFramebuffer;
-
         IG_LOG(L_DEBUG) << "Handling technique variant " << i << std::endl;
         IG_LOG(L_DEBUG) << "Compiling ray generation shader" << std::endl;
-        const std::filesystem::path rgp = "v" + std::to_string(i) + "_rayGenerationFull.art";
-        shaders.RayGenerationShader     = ig_compile_source(variant.RayGenerationShader, "ig_ray_generation_shader",
-                                                        mOptions.DumpShaderFull ? &rgp : nullptr);
+        shaders.RayGenerationShader = compileShader(variant.RayGenerationShader, "ig_ray_generation_shader", "v" + std::to_string(i) + "_rayGeneration");
+        if (shaders.RayGenerationShader == nullptr) {
+            IG_LOG(L_ERROR) << "Failed to compile ray generation shader in variant " << i << "." << std::endl;
+            return false;
+        }
 
         IG_LOG(L_DEBUG) << "Compiling miss shader" << std::endl;
-        const std::filesystem::path mp = "v" + std::to_string(i) + "_missShaderFull.art";
-        shaders.MissShader             = ig_compile_source(variant.MissShader, "ig_miss_shader",
-                                               mOptions.DumpShaderFull ? &mp : nullptr);
+        shaders.MissShader = compileShader(variant.MissShader, "ig_miss_shader", "v" + std::to_string(i) + "_missShader");
+        if (shaders.MissShader == nullptr) {
+            IG_LOG(L_ERROR) << "Failed to compile miss shader in variant " << i << "." << std::endl;
+            return false;
+        }
 
         IG_LOG(L_DEBUG) << "Compiling hit shaders" << std::endl;
         for (size_t j = 0; j < variant.HitShaders.size(); ++j) {
             IG_LOG(L_DEBUG) << "Hit shader [" << j << "]" << std::endl;
-            const std::filesystem::path hp = "v" + std::to_string(i) + "_hitShaderFull" + std::to_string(j) + ".art";
-            shaders.HitShaders.push_back(ig_compile_source(variant.HitShaders[j], "ig_hit_shader", mOptions.DumpShaderFull ? &hp : nullptr));
+            shaders.HitShaders.push_back(compileShader(variant.HitShaders[j].c_str(), "ig_hit_shader", "v" + std::to_string(i) + "_hitShader" + std::to_string(j)));
+            if (shaders.HitShaders[j] == nullptr) {
+                IG_LOG(L_ERROR) << "Failed to compile hit shader " << j << " in variant " << i << "." << std::endl;
+                return false;
+            }
         }
 
         if (!variant.AdvancedShadowHitShader.empty()) {
             IG_LOG(L_DEBUG) << "Compiling advanced shadow shaders" << std::endl;
-            const std::filesystem::path ash = "v" + std::to_string(i) + "_advancedShadowHitFull.art";
-            shaders.AdvancedShadowHitShader = ig_compile_source(variant.AdvancedShadowHitShader, "ig_advanced_shadow_shader",
-                                                                mOptions.DumpShaderFull ? &ash : nullptr);
+            shaders.AdvancedShadowHitShader = compileShader(variant.AdvancedShadowHitShader.c_str(), "ig_advanced_shadow_shader", "v" + std::to_string(i) + "_advancedShadowHit");
 
-            const std::filesystem::path asm_ = "v" + std::to_string(i) + "_advancedShadowMissFull.art";
-            shaders.AdvancedShadowMissShader = ig_compile_source(variant.AdvancedShadowMissShader, "ig_advanced_shadow_shader",
-                                                                 mOptions.DumpShaderFull ? &asm_ : nullptr);
+            if (shaders.AdvancedShadowHitShader == nullptr) {
+                IG_LOG(L_ERROR) << "Failed to compile advanced shadow hit shader in variant " << i << "." << std::endl;
+                return false;
+            }
+
+            shaders.AdvancedShadowMissShader = compileShader(variant.AdvancedShadowMissShader.c_str(), "ig_advanced_shadow_shader", "v" + std::to_string(i) + "_advancedShadowMiss");
+
+            if (shaders.AdvancedShadowMissShader == nullptr) {
+                IG_LOG(L_ERROR) << "Failed to compile advanced shadow miss shader in variant " << i << "." << std::endl;
+                return false;
+            }
         }
 
-        for (size_t i = 0; i < variant.CallbackShaders.size(); ++i) {
-            if (variant.CallbackShaders[i].empty()) {
-                shaders.CallbackShaders[i] = nullptr;
+        for (size_t j = 0; j < variant.CallbackShaders.size(); ++j) {
+            if (variant.CallbackShaders.at(j).empty()) {
+                shaders.CallbackShaders[j] = nullptr;
             } else {
                 IG_LOG(L_DEBUG) << "Compiling callback shader [" << i << "]" << std::endl;
-                const std::filesystem::path asm_ = " v" + std::to_string(i) + "_callbackFull" + std::to_string(i) + ".art";
-                shaders.CallbackShaders[i]       = ig_compile_source(variant.CallbackShaders[i], "ig_callback_shader",
-                                                               mOptions.DumpShaderFull ? &asm_ : nullptr);
+                shaders.CallbackShaders[j] = compileShader(variant.CallbackShaders.at(j), "ig_callback_shader", "v" + std::to_string(i) + "_callback" + std::to_string(j));
+                if (shaders.CallbackShaders.at(j) == nullptr) {
+                    IG_LOG(L_ERROR) << "Failed to compile callback " << j << " shader in variant " << i << "." << std::endl;
+                    return false;
+                }
             }
         }
     }
+    IG_LOG(L_DEBUG) << "Compiling shaders took " << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - startJIT).count() / 1000.0f << " seconds" << std::endl;
+
+    return true;
 }
 
-void Runtime::handleTechniqueVariants(uint32 nextIteration)
+void* Runtime::compileShader(const std::string& src, const std::string& func, const std::string& name)
 {
-    if (mTechniqueVariantSelector)
-        mCurrentTechniqueVariant = mTechniqueVariantSelector(nextIteration);
+    if (mOptions.DumpShader)
+        dumpShader(name + ".art", src);
 
-    IG_ASSERT(mCurrentTechniqueVariant < mTechniqueVariants.size(), "Expected technique variant to be well selected");
+    const std::string full_shader = mScriptPreprocessor.prepare(src);
 
-    mLoadedInterface.SetShaderSetFunction(mTechniqueVariantShaderSets[mCurrentTechniqueVariant]);
+    if (mOptions.DumpShaderFull)
+        dumpShader(name + "_full.art", full_shader);
+
+    return mLoadedInterface.CompileSourceFunction(full_shader.c_str(), func.c_str());
+}
+
+void Runtime::tonemap(uint32* out_pixels, const TonemapSettings& settings)
+{
+    if (mTechniqueVariants.empty()) {
+        IG_LOG(L_ERROR) << "No scene loaded!" << std::endl;
+        return;
+    }
+
+    mLoadedInterface.TonemapFunction((int)mDevice, out_pixels, settings);
+}
+
+void Runtime::imageinfo(const ImageInfoSettings& settings, ImageInfoOutput& output)
+{
+    if (mTechniqueVariants.empty()) {
+        IG_LOG(L_ERROR) << "No scene loaded!" << std::endl;
+        return;
+    }
+
+    mLoadedInterface.ImageInfoFunction((int)mDevice, settings, output);
+}
+
+void Runtime::setParameter(const std::string& name, int value)
+{
+    mParameterSet.IntParameters[name] = value;
+}
+
+void Runtime::setParameter(const std::string& name, float value)
+{
+    mParameterSet.FloatParameters[name] = value;
+}
+
+void Runtime::setParameter(const std::string& name, const Vector3f& value)
+{
+    mParameterSet.VectorParameters[name] = value;
+}
+
+void Runtime::setParameter(const std::string& name, const Vector4f& value)
+{
+    mParameterSet.ColorParameters[name] = value;
+}
+
+std::vector<std::string> Runtime::getAvailableTechniqueTypes()
+{
+    return Loader::getAvailableTechniqueTypes();
+}
+
+std::vector<std::string> Runtime::getAvailableCameraTypes()
+{
+    return Loader::getAvailableCameraTypes();
 }
 } // namespace IG

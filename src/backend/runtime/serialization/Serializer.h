@@ -19,7 +19,7 @@ using is_trivial_serializable = std::integral_constant<
 class Serializer {
 public:
     explicit Serializer(bool readmode);
-    virtual ~Serializer();
+    virtual ~Serializer() = default;
 
     inline bool isReadMode() const;
 
@@ -47,11 +47,15 @@ public:
     write(const std::vector<T, Alloc>& vec, bool naked = false);
     template <typename T1, typename T2>
     inline void write(const std::unordered_map<T1, T2>& map);
-    template <typename Scalar, int Rows, int Cols, int Options>
-    inline void write(const Eigen::Matrix<Scalar, Rows, Cols, Options>& v);
+
+    // Write out in row-major (or col-major)
+    template <typename Derived>
+    inline void write(const Eigen::MatrixBase<Derived>& v, bool colMajor = false);
 
     template <typename T, typename Alloc>
     void writeAligned(const std::vector<T, Alloc>& vec, size_t padding, bool naked = false);
+
+    void writeAlignmentPad(size_t alignment);
 
     // Read
     inline void read(bool& v);
@@ -76,13 +80,16 @@ public:
     read(std::vector<T, Alloc>& vec);
     template <typename T1, typename T2>
     inline void read(std::unordered_map<T1, T2>& map);
-    template <typename Scalar, int Rows, int Cols, int Options>
-    inline void read(Eigen::Matrix<Scalar, Rows, Cols, Options>& v);
+
+    // Write out in row-major (or col-major)
+    template <typename Derived>
+    inline void read(Eigen::MatrixBase<Derived>& v, bool colMajor = false);
 
     // Interface
     virtual bool isValid() const                            = 0;
     virtual size_t writeRaw(const uint8* data, size_t size) = 0;
     virtual size_t readRaw(uint8* data, size_t size)        = 0;
+    virtual size_t currentSize() const                      = 0;
 
 protected:
     inline void setReadMode(bool b) { mReadMode = b; };

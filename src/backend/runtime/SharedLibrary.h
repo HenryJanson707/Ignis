@@ -5,11 +5,11 @@
 namespace IG {
 class SharedLibrary {
 public:
-    SharedLibrary();
-    SharedLibrary(const std::filesystem::path& file);
-    ~SharedLibrary();
+    SharedLibrary() = default;
+    explicit SharedLibrary(const std::filesystem::path& file);
+    ~SharedLibrary() = default;
 
-    void* symbol(const std::string& name) const;
+    void* symbol(const std::string_view& name) const;
     void unload();
 
     inline operator bool() const { return mInternal != nullptr; }
@@ -17,6 +17,6 @@ public:
 
 private:
     std::filesystem::path mPath;
-    std::shared_ptr<struct SharedLibraryInternal> mInternal;
+    std::shared_ptr<class SharedLibraryInternal> mInternal;
 };
 } // namespace IG

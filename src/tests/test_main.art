@@ -1,3 +1,0 @@
-#[export] fn test_main() -> i32 { 
-    test_bbox() + test_matrix() + test_intersection() + test_microfacet() + test_reduction()
-}

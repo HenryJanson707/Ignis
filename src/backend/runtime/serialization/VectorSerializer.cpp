@@ -8,10 +8,6 @@ VectorSerializer::VectorSerializer(std::vector<uint8>& data, bool readmode)
 {
 }
 
-VectorSerializer::~VectorSerializer()
-{
-}
-
 void VectorSerializer::ensureAlignment(size_t alignment)
 {
     if (alignment == 0)
@@ -25,6 +21,11 @@ void VectorSerializer::ensureAlignment(size_t alignment)
 bool VectorSerializer::isValid() const
 {
     return isReadMode() ? mIt < mData.size() : mIt == mData.size();
+}
+
+size_t VectorSerializer::currentSize() const
+{
+    return mData.size();
 }
 
 size_t VectorSerializer::writeRaw(const uint8* data, size_t size)

@@ -1,7 +1,8 @@
-fn @pick_light(rnd: &mut RndState, num_lights: i32) {
+fn @pick_light_id(rnd: &mut RndState, num_lights: i32) {
     if ?num_lights && num_lights == 1 {
         0
     } else {
+        // Note: randi() returns random integers, but we only want positive integers here
         (randi(rnd) & 0x7FFFFFFF) % num_lights
     }
 }
@@ -22,7 +23,6 @@ struct PTRayPayload {
 static AOV_PATH_NORMAL = 1;
 static AOV_PATH_DIRECT = 2;
 static AOV_PATH_NEE    = 3;
-static AOV_PATH_STATS  = 4;
 
 fn wrap_ptraypayload(payload: PTRayPayload) -> RayPayload {
     let mut r : RayPayload;
@@ -35,7 +35,7 @@ fn wrap_ptraypayload(payload: PTRayPayload) -> RayPayload {
     r
 }
 
-fn unrap_ptraypayload(payload: RayPayload) = PTRayPayload {
+fn unwrap_ptraypayload(payload: RayPayload) = PTRayPayload {
     mis     = payload.components(0),
     contrib = make_color(payload.components(1), payload.components(2), payload.components(3), 1),
     depth   = payload.components(4) as i32,
@@ -384,7 +384,11 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
                  , surf: SurfaceElement
                  , mat: Material
                  ) -> Option[(Ray, RayPayload)] {
-        let pt = unrap_ptraypayload(payload);
+        let pt = unwrap_ptraypayload(payload);
+        
+        if pt.depth + 1 > max_path_len {
+            return(Option[(Ray, RayPayload)]::None)
+        }
 
         if pt.depth >= max_path_len {
             return(Option[(Ray, RayPayload)]::None)
@@ -473,7 +477,7 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
         on_miss        = on_miss,
         on_shadow      = on_shadow,
         on_bounce      = on_bounce,
-        on_shadow_hit  = @ |_, _, _| Option[(Color)]::None,
+        on_shadow_hit  = TechniqueNoShadowHitFunction,
         on_shadow_miss = on_shadow_miss,
     }
 }
