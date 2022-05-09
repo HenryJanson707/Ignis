@@ -30,6 +30,7 @@ static void ao_body_loader(std::ostream& stream, const std::string&, const std::
 
 static TechniqueInfo bi_get_info(const std::string&, const std::shared_ptr<Parser::Object>& technique, const LoaderContext&){
     TechniqueInfo info;
+    return info;
     //info.OverrideCameraGenerator.push_back("light"); //TODO Check if this works???
 }
 
@@ -100,8 +101,16 @@ static TechniqueInfo path_get_info(const std::string&, const std::shared_ptr<Par
         }
     }
 
-    auto variant_selector = [](uint32 i){
-        return (i + 1) % 2; //TODO this is only true if we begin with zero
+    // auto variant_selector = [](uint32 i){
+    //     return (i + 1) % 2; //TODO this is only true if we begin with zero
+    // };
+
+    auto variant_selector = [] (size_t size){
+        std::vector<size_t> ret(size);
+        for(size_t i = 0; i < size; i++){
+            ret.at(i) = (i + 1) % 2;
+        }
+        return ret;
     };
 
     info.VariantSelector = variant_selector;
@@ -120,19 +129,20 @@ static TechniqueInfo path_get_info(const std::string&, const std::shared_ptr<Par
 
         stream << LoaderLight::generate(tree, false) << std::endl;
         stream << "  let (film_width, film_height) = device.get_film_size();" << std::endl;
+        stream << "  let spp = " << ctx.SamplesPerIteration << " : i32;" << std::endl;
         //The Buffer Size is far too big!!
         stream << "  let max_depth_light = 5;" << std::endl;
         stream << "  let buf_size = film_width * film_height * 4 * max_depth_light * 16;" << std::endl; //TODO Find a better to set a max depth
         stream << "  let buf = device.request_buffer(\"bi\", buf_size, 0);" << std::endl;
+        stream << "  let offset:f32 = 0.001;" << std::endl; //TODO find a better way to define this
         stream << "  let camera = make_light_camera(" << std::endl;
-        stream << "     settings.tmin," << std::endl;
-        stream << "     settings.tmax," << std::endl;
+        stream << "     offset," << std::endl;
+        stream << "     flt_max," << std::endl;
         stream << "     buf," << std::endl;
         stream << "     num_lights," << std::endl;
         stream << "     lights,"  << std::endl;
         stream << "     max_depth_light);" << std::endl;//TODO Find a better to set a max depth
 
-        stream << "  let spp = " << ctx.SamplesPerIteration << " : i32;" << std::endl;
         IG_ASSERT(!gen.empty(), "Generator function can not be empty!");
         stream << "  let emitter = make_camera_emitter(camera, iter, spp, make_uniform_pixel_sampler()/*make_mjitt_pixel_sampler(4,4)*/, init_raypayload);" << std::endl;
 

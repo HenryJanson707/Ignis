@@ -62,6 +62,7 @@ set(ARTIC_EXTRA_SRC
     ${CMAKE_CURRENT_SOURCE_DIR}/impl/camera/fishlens.art
     ${CMAKE_CURRENT_SOURCE_DIR}/impl/camera/orthogonal.art
     ${CMAKE_CURRENT_SOURCE_DIR}/impl/camera/perspective.art
+    ${CMAKE_CURRENT_SOURCE_DIR}/impl/camera/light.art
     ${CMAKE_CURRENT_SOURCE_DIR}/impl/light/area.art
     ${CMAKE_CURRENT_SOURCE_DIR}/impl/light/cie.art
     ${CMAKE_CURRENT_SOURCE_DIR}/impl/light/common.art

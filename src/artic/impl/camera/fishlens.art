@@ -48,7 +48,7 @@ fn @make_fishlens_camera(eye: Vec3, dir: Vec3, up: Vec3, w: f32, h: f32, mode: F
     }
 
     Camera {
-        generate_ray = @ |_, x, y| {
+        generate_ray = @ |_, x, y, _| {
             make_ray(eye, compute_d(x,y), tmin, tmax)
         },
         differential = @ |pixel| {

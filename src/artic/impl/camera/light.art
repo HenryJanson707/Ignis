@@ -1,0 +1,58 @@
+fn @make_light_camera(tmin: f32, tmax: f32, buf: DeviceBuffer, num_lights: i32, lights: LightTable, max_path_len: i32){
+    let pdf_pick = 1 / (num_lights as f32);
+
+    Camera {
+        differential = @ |_| {//TODO this is wrong!!!!
+            (
+                make_vec3(0,0,0),
+                make_vec3(0,0,0)
+            )
+        },
+        generate_ray = @ |rnd, _, _, pixel| {
+            //let mut temp_rand   = rnd; //maybe faster to just give a mutable random value
+            let light_id        = pick_light_id(rnd, num_lights);
+            let light           = @lights(light_id);
+            let sample_emission = light.sample_emission;
+            let light_sample    = @sample_emission(rnd);
+            //TODO this is wrong
+            //let mis             = light_sample.pdf_area * light_sample.pdf_dir * pdf_pick * light_sample.cos;
+            let pdfFwd          = light_sample.pdf_area * pdf_pick; 
+            let pdfFwd2         = light_sample.pdf_dir;
+            let cos_light       = light_sample.cos;
+            let pdfRev : f32    = 0.0;
+            let pdf             = cos_light / (light_sample.pdf_area * light_sample.pdf_dir * pdf_pick);
+            let pos             = light_sample.pos;
+            let normal          = make_vec3(0, 0, 0);
+            let intensity       = color_to_vec3(light_sample.intensity);
+            let beta            = vec3_mulf(intensity, pdf);
+            let wo              = make_vec3(0, 0, 0); //eventhoug we call it wo in this case it would be wi?
+            let dir             = light_sample.dir;
+
+            let current_pos     = pixel * 16 * max_path_len;
+            let next_pos        = pixel * 16 * max_path_len + 16;
+            // if pixel == 234512{
+            //     print_string("\n");
+            //     print_f32(cos_light);
+            //     print_string("\n");
+            //     print_f32(light_sample.pdf_dir);
+            //     print_string("\n");
+            //     print_f32(pdf);
+            //     print_string("\n");
+            //     print_f32(beta.x);
+            //     print_string("\n");
+            // }
+            //The current size of one data point is 16 bytes (valid: i32 (0, 1): 0, material: i32: 1, pdfFwd: f32 : 2, pdfRev: f32: 3, pos: vec3 : 4, normal: vec3 : 7, beta: vec3 : 10, wo: vec3 : 13)
+            buf.store_int2(current_pos, 1, -1); //Has the light a material???
+            buf.store_f32(current_pos + 2, pdfFwd);
+            buf.store_f32(current_pos + 3, pdfRev);
+            buf.store_vec3(current_pos + 4, pos);
+            buf.store_vec3(current_pos + 7, normal);
+            buf.store_vec3(current_pos + 10, intensity);
+            buf.store_vec3(current_pos + 13, wo);
+
+            buf.store_f32(next_pos + 2, pdfFwd2);
+            buf.store_vec3(next_pos + 10, beta);
+            make_ray(pos, dir, tmin, tmax)
+        }
+    }
+}

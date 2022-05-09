@@ -6,7 +6,7 @@ fn @make_perspective_camera(eye: Vec3, dir: Vec3, up: Vec3, w: f32, h: f32, fov:
     let sh    = sw * h / w;
 
     Camera {
-        generate_ray = @ |_, x, y| {
+        generate_ray = @ |_, x, y, _| {
             let d = vec3_normalize(mat3x3_mul(view, make_vec3(sw * x, sh * y, 1)));
             make_ray(eye, d, tmin, tmax)
         },
@@ -27,7 +27,7 @@ fn @make_perspective_dof_camera(eye: Vec3, dir: Vec3, up: Vec3, w: f32, h: f32, 
     let sh    = sw * h / w;
 
     Camera {
-        generate_ray = @ |rnd, x, y| {
+        generate_ray = @ |rnd, x, y, _| {
             let global_dir = vec3_normalize(mat3x3_mul(view, make_vec3(sw * x, sh * y, 1)));
             let focus_pos  = vec3_mulf(global_dir, focal_length);
 

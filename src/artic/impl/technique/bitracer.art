@@ -20,7 +20,7 @@ fn @make_light_renderer(buf: DeviceBuffer, max_path_len_light: i32) -> Technique
                  , surf: SurfaceElement
                  , mat: Material
                  ) -> Option[(Ray, RayPayload)] {
-        let pt = unrap_ptraypayload(payload);
+        let pt = unwrap_ptraypayload(payload);
         
         //TODO is that at the right position or should it be further down?
         if pt.depth >= max_path_len_light {
@@ -110,7 +110,7 @@ fn @make_light_renderer(buf: DeviceBuffer, max_path_len_light: i32) -> Technique
     Technique {
         on_hit    = @ |_, _, _, _, _, _| Option[(Color)]::None,
         on_miss   = @ |_, _, _| Option[(Color)]::None,
-        on_shadow = @ |_, _, _, _, _, _, _| Option[(Ray, Color)]::None,
+        on_shadow = @ |_, _, _, _, _, _, _| ShadowRay::None,
         on_bounce      = on_bounce,
         on_shadow_hit  = @ |_, _, _| Option[(Color)]::None,
         on_shadow_miss = @ |_, _, _| Option[(Color)]::None,
