@@ -105,11 +105,11 @@ static TechniqueInfo path_get_info(const std::string&, const std::shared_ptr<Par
     //     return (i + 1) % 2; //TODO this is only true if we begin with zero
     // };
 
+    //You should swap light and pathtracer than this would not be needed!!
     auto variant_selector = [] (size_t size){
-        std::vector<size_t> ret(size);
-        for(size_t i = 0; i < size; i++){
-            ret.at(i) = (i + 1) % 2;
-        }
+        std::vector<size_t> ret(2);
+        ret.at(0) = 1;
+        ret.at(1) = 0;
         return ret;
     };
 
