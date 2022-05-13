@@ -150,57 +150,66 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
             let camera_wi = vec3_mulf(light_dir, 1/light_dist);
             let light_wo = vec3_neg(camera_wi);
             
-            let geom_factor = 1 / light_dist2; //the two cos factors should be in in the two bsdf calculations
-            let camera_bsdf = mat.bsdf.eval(camera_wi, camera_wo);
+            let vis_camera = vec3_dot(camera_wi, surf.face_normal);
+            let vis_camera2 = vec3_dot(camera_wo, surf.face_normal);
+            let vis_light = vec3_dot(light_wo, light_normal);
+            let vis_light2 = vec3_dot(light_wi, light_normal);
+            if vis_camera > flt_eps && vis_camera2 > flt_eps && vis_light > flt_eps && vis_light2 > flt_eps{ 
+                let light_surf = SurfaceElement{
+                    is_entering = true,
+                    point = light_pos,
+                    face_normal = light_normal,
+                    inv_area = 1, //TODO this is wrong but should not matter 
+                    prim_coords = make_vec2(0,0),
+                    tex_coords = make_vec2(0,0),
+                    local = make_orthonormal_mat3x3(light_normal)
+                };
 
-            let light_surf = SurfaceElement{
-                is_entering = true,
-                point = light_pos,
-                face_normal = light_normal,
-                inv_area = 1, //TODO this is wrong but should not matter 
-                prim_coords = make_vec2(0,0),
-                tex_coords = make_vec2(0,0),
-                local = make_orthonormal_mat3x3(light_normal)
-            };
+                let light_mat = make_diffuse_bsdf(light_surf, make_color(1,1,1,1));
 
-            let light_mat = make_diffuse_bsdf(light_surf, make_color(1,1,1,1));
+                let geom_factor = 1 / light_dist2; //the two cos factors should be in in the two bsdf calculations
+                let camera_bsdf = mat.bsdf.eval(camera_wi, camera_wo);
 
+                let light_bsdf = light_mat.eval(light_wo, light_wi); 
+                let conection = color_mulf(color_mul(camera_bsdf, light_bsdf), geom_factor);
+                let contri = color_mul(color_mul(conection, camera_beta), light_beta);
+            
+                // if(pixel == 234551){
+                //     print_string("\n");
+                //     print_f32(light_dist);
+                //     print_string("\n");
+                //     print_f32(geom_factor);
+                //     print_string("\n");
+                //     print_f32(light_bsdf.r);print_string(",");print_f32(light_bsdf.g);print_string(",");print_f32(light_bsdf.b);print_string(",");
+                //     print_string("\n");
+                //     print_f32(conection.r);print_string(",");print_f32(conection.g);print_string(",");print_f32(conection.b);print_string(",");
+                //     print_string("\n");
+                //     print_f32(light_pos.x);print_string(",");print_f32(light_pos.y);print_string(",");print_f32(light_pos.z);print_string(",");
+                //     print_string("\n");
+                //     print_f32(surf.point.x);print_string(",");print_f32(surf.point.y);print_string(",");print_f32(surf.point.z);print_string(",");
+                //     print_string("\n");
+                //     print_f32(light_normal.x);print_string(",");print_f32(light_normal.y);;print_string(",");print_f32(light_normal.z);;print_string(",");
+                //     print_string("\n");
+                //     print_f32(surf.face_normal.x);print_string(",");print_f32(surf.face_normal.y);;print_string(",");print_f32(surf.face_normal.z);;print_string(",");
+                //     print_string("\n");
+                //     print_f32(light_beta.r);print_string(",");print_f32(light_beta.g);print_string(",");print_f32(light_beta.b);print_string(",");
+                //     print_string("\n");
+                //     print_f32(light_wi.x);print_string(",");print_f32(light_wi.y);print_string(",");print_f32(light_wi.z);print_string(",");
+                //     print_string("\n");
+                //     print_f32(light_wo.x);print_string(",");print_f32(light_wo.y);print_string(",");print_f32(light_wo.z);print_string(",");
+                //     print_string("\n");
+                //     print_f32(contri.r);print_string(",");print_f32(contri.g);print_string(",");print_f32(contri.b);print_string(",");
+                //     print_string("\n");
+                // }
 
-            let light_bsdf = light_mat.eval(light_wi, light_wo); 
-            let conection = color_mulf(color_mul(camera_bsdf, light_bsdf), geom_factor);
-            let contri = color_mul(color_mul(conection, camera_beta), light_beta);
-         
-            // if(contri.r > 100000){
-            //     print_string("\n");
-            //     print_f32(light_dist);
-            //     print_string("\n");
-            //     print_f32(geom_factor);
-            //     print_string("\n");
-            //     print_f32(light_bsdf.r);print_string(",");print_f32(light_bsdf.g);print_string(",");print_f32(light_bsdf.b);print_string(",");
-            //     print_string("\n");
-            //     print_f32(conection.r);print_string(",");print_f32(conection.g);print_string(",");print_f32(conection.b);print_string(",");
-            //     print_string("\n");
-            //     print_f32(light_pos.x);print_string(",");print_f32(light_pos.y);print_string(",");print_f32(light_pos.z);print_string(",");
-            //     print_string("\n");
-            //     print_f32(surf.point.x);print_string(",");print_f32(surf.point.y);print_string(",");print_f32(surf.point.z);print_string(",");
-            //     print_string("\n");
-            //     print_f32(light_normal.x);print_string(",");print_f32(light_normal.y);;print_string(",");print_f32(light_normal.z);;print_string(",");
-            //     print_string("\n");
-            //     print_f32(surf.face_normal.x);print_string(",");print_f32(surf.face_normal.y);;print_string(",");print_f32(surf.face_normal.z);;print_string(",");
-            //     print_string("\n");
-            //     print_f32(light_beta.r);print_string(",");print_f32(light_beta.g);print_string(",");print_f32(light_beta.b);print_string(",");
-            //     print_string("\n");
-            //     print_f32(light_wi.x);print_string(",");print_f32(light_wi.y);print_string(",");print_f32(light_wi.z);print_string(",");
-            //     print_string("\n");
-            //     print_f32(contri.r);print_string(",");print_f32(contri.g);print_string(",");print_f32(contri.b);print_string(",");
-            //     print_string("\n");
-            // }
-
-            //return(Option[(Ray, Color)]::None)
-            return(make_simple_shadow_ray(
-                make_ray(surf.point, light_dir, offset, 1 - offset),
-                contri
-            ))
+                //return(Option[(Ray, Color)]::None)
+                return(make_simple_shadow_ray(
+                    make_ray(surf.point, light_dir, offset, 1 - offset),
+                    contri
+                ))
+            }else{
+                ShadowRay::None
+            }
         }else{
             ShadowRay::None
         }
