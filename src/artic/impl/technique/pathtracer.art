@@ -100,12 +100,12 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
                 let wo = vec3_neg(ray.dir);
 
                 let vis = vec3_dot(light_dir, surf.local.col(2));
+                // if vis > flt_eps && light_sample.cos > flt_eps && pt.depth == 2{
                 if vis > flt_eps && light_sample.cos > flt_eps {
                     let cos_l = light_sample.cos;
                     let pdf_area = light_sample.pdf_area;
-                    //let pdf_dir = light_sample.pdf_dir;
                     //TODO can we use cos_l here???
-                    let pdf_dirpos = pdf_area * light_dist2 / (cos_l); //pdf_area should just be 1/area
+                    let pdf_dirpos = pdf_area * light_dist2 / (cos_l);
 
                     let light_beta = color_mulf(light_sample.intensity, 1/(pdf_dirpos * light_pdf));
                     let f = mat.bsdf.eval(wi, wo); //Ich gehe davon aus das hier auch schon Cos drinnen ist?
@@ -154,6 +154,7 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
             let vis_camera2 = vec3_dot(camera_wo, surf.face_normal);
             let vis_light = vec3_dot(light_wo, light_normal);
             let vis_light2 = vec3_dot(light_wi, light_normal);
+            // if vis_camera > flt_eps && vis_camera2 > flt_eps && vis_light > flt_eps && vis_light2 > flt_eps && pt.depth == 1{
             if vis_camera > flt_eps && vis_camera2 > flt_eps && vis_light > flt_eps && vis_light2 > flt_eps{ 
                 let light_surf = SurfaceElement{
                     is_entering = true,
@@ -175,6 +176,7 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
                 let contri = color_mul(color_mul(conection, camera_beta), light_beta);
             
                 // if(pixel == 234551){
+                //     print_string("Camera");
                 //     print_string("\n");
                 //     print_f32(light_dist);
                 //     print_string("\n");
@@ -200,6 +202,7 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
                 //     print_string("\n");
                 //     print_f32(contri.r);print_string(",");print_f32(contri.g);print_string(",");print_f32(contri.b);print_string(",");
                 //     print_string("\n");
+                //     print_flush();
                 // }
 
                 //return(Option[(Ray, Color)]::None)

@@ -32,21 +32,10 @@ fn @make_light_renderer(buf: DeviceBuffer, max_path_len_light: i32) -> Technique
         // Bounce
         let wo       = vec3_neg(ray.dir);
         let buf_pos  = 16 * pixel * max_path_len_light;
-        //TODO geht das ueberhaupt so??? wir haben ja die in_dir nicht die out dir???
-        if let Option[BsdfSample]::Some(mat_sample) = mat.bsdf.sample(rnd, wo, true) {//TODO mostliky this is not right!!! Look at the Direktion
+        //TODO check wo?
+        if let Option[BsdfSample]::Some(mat_sample) = mat.bsdf.sample(rnd, wo, true) {
             let mut beta   = pt.contrib;
             let mut pdfFwd = pt.mis;
-
-            //let contrib = color_mul(pt.contrib, mat_sample.color/* Pdf and cosine are already applied!*/);
-
-            // let rr_prob = if mat.bsdf.is_specular { 1 } else { russian_roulette_pbrt(color_mulf(pt.contrib, pt.eta * pt.eta), 0.95) };
-            // if pt.depth >= max_path_len_light || randf(rnd) >= rr_prob {
-            //     return(Option[(Ray, RayPayload)]::None)
-            // }
-            
-            //TODO this is wrong the mis function
-            // let mis = if mat.bsdf.is_specular { 0 } else { 1 / mat_sample.pdf };
-            // let new_contrib = color_mulf(contrib, 1 / rr_prob);
 
             let current_buf_pos = buf_pos + pt.depth * 16;
             let prev_buf_pos = buf_pos + (pt.depth - 1) * 16;
@@ -74,23 +63,20 @@ fn @make_light_renderer(buf: DeviceBuffer, max_path_len_light: i32) -> Technique
             buf.store_vec3(current_buf_pos + 10, color_to_vec3(beta));
             buf.store_vec3(current_buf_pos + 13, wo);
             
-            // if(pixel == 32566){
+            // if(pixel == 234551 && pt.depth < 3){
+            //     print_string("Light_Bounce");
             //     print_string("\n");
-            //     print_i32(pt.depth);
+            //     print_f32(surf.face_normal.x);print_string(", ");print_f32(surf.face_normal.y);print_string(", ");print_f32(surf.face_normal.z);
             //     print_string("\n");
-            //     print_f32(beta.r);
+            //     print_f32(surf.local.col(2).x);print_string(", ");print_f32(surf.local.col(2).y);print_string(", ");print_f32(surf.local.col(2).z);
             //     print_string("\n");
-            //     print_f32(mat_sample.color.r);
-            //     print_string("\n");
-            //     print_f32(pdfFwd);
-            //     print_string("\n");
+            //     print_flush();
             // }
 
             let next_pdf = mat_sample.pdf;
             if next_pdf == 0.0{ //TODO better use Epsilon?
                 return(Option[(Ray, RayPayload)]::None)
             }
-            //let next_contri = color_mulf(color_mul(beta, mat_sample.color), 1 / next_pdf); //TODO check this line
             let next_contri = color_mul(beta, mat_sample.color); //cos and pdf is already applied
 
             make_option(
