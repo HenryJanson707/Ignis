@@ -175,7 +175,7 @@ static void path_body_loader(std::ostream& stream, const std::string&, const std
     
     if(ctx.CurrentTechniqueVariant == 0){
         stream << "  let buf_size_camera = film_width * film_height * 4 * " << max_depth << " * 16;" << std::endl;
-        stream << "  let buf_camera = device.request_buffer(\"camera\", buf_size, 0);" << std::endl;
+        stream << "  let buf_camera = device.request_buffer(\"camera\", buf_size_camera, 0);" << std::endl;
         size_t counter = 1;
         if (hasNormalAOV)
             stream << "  let aov_normals = device.load_aov_image(" << counter++ << ", spp);" << std::endl;
