@@ -76,8 +76,9 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
 
         let light_buf_pos  = 16 * pixel * max_path_len_light;
         let camera_buf_pos = 16 * pixel * max_path_len;
+        let current_max_depth = buf.load_i32(light_buf_pos);
 
-        let s = 2;
+        let s = 1;
 
         if s == 1{
             let light_id      = pick_light_id(rnd, num_lights);
@@ -100,8 +101,8 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
                 let wo = vec3_neg(ray.dir);
 
                 let vis = vec3_dot(light_dir, surf.local.col(2));
-                // if vis > flt_eps && light_sample.cos > flt_eps && pt.depth == 2{
-                if vis > flt_eps && light_sample.cos > flt_eps {
+                if vis > flt_eps && light_sample.cos > flt_eps && pt.depth >= 3{
+//                if vis > flt_eps && light_sample.cos > flt_eps {
                     let cos_l = light_sample.cos;
                     let pdf_area = light_sample.pdf_area;
                     //TODO can we use cos_l here???
@@ -131,7 +132,7 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
                     return(ShadowRay::None)
                 }
             }
-        }else if s > 1{
+        }else if s > 1 && current_max_depth >= s-1{
             let camera_pos = surf.point;
             let camera_wo = vec3_neg(ray.dir);
             let camera_beta = pt.contrib;
