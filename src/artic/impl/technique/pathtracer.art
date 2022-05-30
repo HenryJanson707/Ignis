@@ -20,6 +20,43 @@ struct PTRayPayload {
     eta:     f32
 }
 
+struct Vertex {
+    //The current size of one data point is 16 bytes (valid: i32 (0, 1): 0, material: i32: 1, pdfFwd: f32 : 2, pdfRev: f32: 3, pos: vec3 : 4, normal: vec3 : 7, beta: vec3 : 10, wo: vec3 : 13)
+    mat:    i32,
+    pdfFwd: f32,
+    pdfRev: f32,
+    pos:    Vec3,
+    normal: Vec3,
+    beta:   Color,
+    wo:     Vec3
+}
+
+fn @make_empty_Vertex() -> Vertex{
+   Vertex {
+       mat =        0,
+       pdfFwd =     0.0,
+       pdfRev =     0.0,
+       pos =        make_vec3(0.0, 0.0, 0.0),
+       normal =     make_vec3(0.0, 0.0, 0.0),
+       beta =       make_color(0.0, 0.0, 0.0, 0.0),
+       wo =         make_vec3(0.0, 0.0, 0.0)
+   } 
+}
+
+fn @load_vertex(buf: DeviceBuffer, bufPos: i32) -> Vertex{
+    //The current size of one data point is 16 bytes (valid: i32 (0, 1): 0, material: i32: 1, pdfFwd: f32 : 2, pdfRev: f32: 3, pos: vec3 : 4, normal: vec3 : 7, beta: vec3 : 10, wo: vec3 : 13)
+    Vertex {
+        mat =       buf.load_i32(bufPos + 1),
+        pdfFwd =    buf.load_f32(bufPos + 2),
+        pdfRev =    buf.load_f32(bufPos + 3),
+        pos =       buf.load_vec3(bufPos + 4),
+        normal =    buf.load_vec3(bufPos + 7),
+        beta =      vec3_to_color(buf.load_vec3(bufPos + 10)),
+        wo =        buf.load_vec3(bufPos + 13)
+    }
+}
+
+
 static AOV_PATH_NORMAL = 1;
 static AOV_PATH_DIRECT = 2;
 static AOV_PATH_NEE    = 3;
