@@ -20,11 +20,11 @@ fn @make_light_camera(tmin: f32, tmax: f32, buf: DeviceBuffer, num_lights: i32, 
             let pdfRev : f32    = 0.0;
             let pdf             = cos_light / (light_sample.pdf_area * light_sample.pdf_dir * pdf_pick);
             let pos             = light_sample.pos;
-            let normal          = make_vec3(0, 0, 0); //This should be fine because its s=1 wich never is called
             let intensity       = color_to_vec3(light_sample.intensity);
             let beta            = vec3_mulf(intensity, pdf);
             let wo              = make_vec3(0, 0, 0); //This should be fine because its s=1 wich never is called
             let dir             = light_sample.dir;
+            let normal          = dir; //check if this is fine???
 
             let current_pos     = pixel * 16 * max_path_len;
             let next_pos        = pixel * 16 * max_path_len + 16;

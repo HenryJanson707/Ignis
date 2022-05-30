@@ -45,12 +45,18 @@ fn @make_light_renderer(buf: DeviceBuffer, max_path_len_light: i32) -> Technique
                 beta       = vec3_to_color(buf.load_vec3(current_buf_pos + 10));
             }
 
+            let pdfRev = mat.bsdf.pdf(mat_sample.in_dir, wo); //this could be wrong!!!!
+
             let current_pos     = surf.point;
             let current_normal  = surf.face_normal;
 
             let prev_pos        = buf.load_vec3(prev_buf_pos + 4);
+            let prev_normal     = buf.load_vec3(prev_buf_pos + 7); 
 
             let correctedFwdPDF = convertDensity(prev_pos, current_pos, current_normal, pdfFwd);
+            let correctedRevPDF = convertDensity(current_pos, prev_pos, prev_normal, pdfRev);
+
+            buf.store_f32(prev_buf_pos + 3, correctedRevPDF);
 
             buf.store_i32(buf_pos, pt.depth + 1); //this means the first pixel position indicates the depth
 
