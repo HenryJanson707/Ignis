@@ -325,13 +325,21 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
             let current_normal = surf.face_normal;
             
             let mut correctedFwdPDF : f32 = 0.0;
+            let mut correctedRevPDF : f32 = 0.0;
             
+            let prev_pos        = buf.load_vec3(prev_buf_pos + 4);
+            let prev_normal     = buf.load_vec3(prev_buf_pos + 7); 
+            
+            let pdfRev = mat.bsdf.pdf(mat_sample.in_dir, wo); //this could be wrong!!!!
+
             //TODO this seems to be a wrong way of handeling this problem
             if(pt.depth != 1){
                 let prev_pos = camera_buf.load_vec3(prev_buf_pos + 4);
                 correctedFwdPDF = convertDensity(prev_pos, current_pos, current_normal, pdfFwd);
+                correctedRevPDF = convertDensity(current_pos, prev_pos, prev_normal, pdfRev);
             }
 
+            camera_buf.store_f32(prev_buf_pos + 3, correctedRevPDF);
             //The current size of one data point is 16 bytes (valid: i32 (0, 1): 0, material: i32: 1, pdfFwd: f32 : 2, pdfRev: f32: 3, pos: vec3 : 4, normal: vec3 : 7, beta: vec3 : 10, wo: vec3 : 13)
             camera_buf.store_int2(current_buf_pos, 1, -1);
             camera_buf.store_f32(current_buf_pos + 2, correctedFwdPDF);
