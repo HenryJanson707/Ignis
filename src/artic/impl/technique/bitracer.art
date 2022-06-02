@@ -64,17 +64,17 @@ fn @make_light_renderer(buf: DeviceBuffer, max_path_len_light: i32) -> Technique
             buf.store_vec3(current_buf_pos + 13, wo);
             
 
-            if(pixel == 32648){
-                let in_dir = mat_sample.in_dir;
-                let correction = vec3_dot(in_dir, current_normal);
-                print_string("Light_Bounce");
-                print_string("\n");
-                print_string("345 correction");print_i32(pt.depth); print_string(" "); print_f32(correction);
-                print_string("\n");
-                print_f32(beta.r);print_string(", ");print_f32(beta.g);print_string(", ");print_f32(beta.b);
-                print_string("\n");
-                print_flush();
-            }
+            // if(pixel == 32648){
+            //     let in_dir = mat_sample.in_dir;
+            //     let correction = vec3_dot(in_dir, current_normal);
+            //     print_string("Light_Bounce");
+            //     print_string("\n");
+            //     print_string("345 correction");print_i32(pt.depth); print_string(" "); print_f32(correction);
+            //     print_string("\n");
+            //     print_f32(beta.r);print_string(", ");print_f32(beta.g);print_string(", ");print_f32(beta.b);
+            //     print_string("\n");
+            //     print_flush();
+            // }
 
             let next_pdf = mat_sample.pdf;
             if next_pdf == 0.0{ //TODO better use Epsilon?
