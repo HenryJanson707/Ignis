@@ -56,6 +56,16 @@ fn @load_vertex(buf: DeviceBuffer, bufPos: i32) -> Vertex{
     }
 }
 
+fn @store_vertex(buf: DeviceBuffer, bufPos: i32, vertex: Vertex){
+    camera_buf.store_int2(bufPos, 1, vertex.mat);
+    camera_buf.store_f32(bufPos + 2, vertex.pdfFwd);
+    camera_buf.store_f32(bufPos + 3, vertex.pdfRev);
+    camera_buf.store_vec3(bufPos + 4, vertex.pos);
+    camera_buf.store_vec3(bufPos + 7, vertex.normal);
+    camera_buf.store_vec3(bufPos + 10, vertex.beta);
+    camera_buf.store_vec3(bufPos + 13, vertex.wo);
+}
+
 
 static AOV_PATH_NORMAL = 1;
 static AOV_PATH_DIRECT = 2;
