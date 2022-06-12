@@ -104,29 +104,38 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
     // let buf_size = film_width * film_height * 4 * max_path_len * 16;
     // let camera_buf = device.request_buffer("camera_path", buf_size, 0);
     //let aov_stats  = @aovs(AOV_PATH_STATS);
- 
+     
+    //Needs tobe checked 
     fn pdfLight(current:Vertex, next:Vertex, light : DirectLightSample){
         let unnorm_w = vec3_sub(next.pos, current.pos);
         let dist2 = vec3_dot(unnorm_w, unnorm_w);
         let dist = math_builtins::sqrt(dist2);
         let norm_w = vec3_divf(unnorm_w, dist);
-        let dir_pdf = light.pdf_dir(); //this is broken currently
+        let dir_pdf = light.pdf_dir(); //this needs tobe checked 
         let pdf = dir_pdf * 1/dist2;
         
         pdf * math_builtins::fabs(vec3_dot(next.normal, norm_w));
     }
 
-    fn pdfConection(current:Vertex, prev:Vertex, next:Vertex, light : Light, isLight: bool, mat: Material){
-        // if isLight{
-        //     return pdfLight(current, next, light)
-        // }
-        // let wn = vec3_normalize(vec3_sub())
-
+    //this needs tobe checked 
+    fn pdfConection(current:Vertex, prev:Vertex, next:Vertex, light : DirectLightSample, isLight: bool, isCamera: bool, mat: Material){
+        if isLight{
+            return pdfLight(current, next, light)
+        }
+        let mut pdf = 0.0;
+        if isCamera{
+            pdf = 1.0;
+        }else{
+            let wn = vec3_normalize(vec3_sub(next.pos, current.pos));
+            let wp = vec3_normalize(vec3_sub(prev.pos, current.pos));
+            let pdf = mat.bsdf.pdf(wp, wn); //this needs tobe checked 
+        }
+        return convertDensity(current.pos, next.pos, next.normal, pdf)//this needs tobe cheked 
 
     }
-
+    //Needs tobe checked 
     fn pdfLightOrigin(current:Vertex, next:Vertex, light : DirectLightSample, choicePDF : f32){
-        let w = vec3_normalize(vec3_sub(next.pos, current.pos));
+        let w = vec3_normalize(vec3_sub(next.pos, current.pos)); //currently Useless
         let pos_pdf = light.pdf_area;
         pos_pdf * choicePDF
     }
