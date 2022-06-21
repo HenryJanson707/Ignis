@@ -106,34 +106,34 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
     //let aov_stats  = @aovs(AOV_PATH_STATS);
      
     //Needs tobe checked 
-    fn pdfLight(current:Vertex, next:Vertex, light : DirectLightSample){
+    fn pdfLightDirect(current:Vertex, next:Vertex, light : DirectLightSample) -> f32{
         let unnorm_w = vec3_sub(next.pos, current.pos);
         let dist2 = vec3_dot(unnorm_w, unnorm_w);
         let dist = math_builtins::sqrt(dist2);
         let norm_w = vec3_divf(unnorm_w, dist);
-        let dir_pdf = light.pdf_dir(); //this needs tobe checked 
+        let dir_pdf = light.pdf_dir; //this needs tobe checked 
         let pdf = dir_pdf * 1/dist2;
         
-        pdf * math_builtins::fabs(vec3_dot(next.normal, norm_w));
+        pdf * math_builtins::fabs(vec3_dot(next.normal, norm_w))
     }
 
-    fn pdfLight(current:Vertex, next:Vertex, light : EmissionValue){
+    fn pdfLightEmission(current:Vertex, next:Vertex, light : EmissionValue) -> f32{
         let unnorm_w = vec3_sub(next.pos, current.pos);
         let dist2 = vec3_dot(unnorm_w, unnorm_w);
         let dist = math_builtins::sqrt(dist2);
         let norm_w = vec3_divf(unnorm_w, dist);
-        let dir_pdf = light.pdf_dir(); //this needs tobe checked 
+        let dir_pdf = light.pdf_dir; //this needs tobe checked 
         let pdf = dir_pdf * 1/dist2;
         
-        pdf * math_builtins::fabs(vec3_dot(next.normal, norm_w));
+        pdf * math_builtins::fabs(vec3_dot(next.normal, norm_w))
     }
 
     //this needs tobe checked 
-    fn pdfConection(current:Vertex, prev:Vertex, next:Vertex, light : DirectLightSample, isLight: bool, isCamera: bool, mat: Material){
+    fn pdfConection(current:Vertex, prev:Vertex, next:Vertex, light : DirectLightSample, isLight: bool, isCamera: bool, mat: Material) -> f32{
         if isLight{
-            return pdfLight(current, next, light)
+            return(pdfLightDirect(current, next, light))
         }
-        let mut pdf = 0.0;
+        let mut pdf : f32 = 0.0;
         if isCamera{
             pdf = 1.0;
         }else{
@@ -141,45 +141,45 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
             let wp = vec3_normalize(vec3_sub(prev.pos, current.pos));
             let pdf = mat.bsdf.pdf(wp, wn); //this needs tobe checked 
         }
-        return convertDensity(current.pos, next.pos, next.normal, pdf)//this needs tobe cheked 
+        return(convertDensity(current.pos, next.pos, next.normal, pdf))//this needs tobe cheked 
 
     }
 
     //this needs tobe checked 
-    fn pdfConectionGround(current:Vertex, prev:Vertex, next:Vertex, mat: Material){
-        let mut pdf = 0.0;
+    fn pdfConectionGround(current:Vertex, prev:Vertex, next:Vertex, mat: Material) -> f32{
+        let mut pdf : f32 = 0.0;
         let wn = vec3_normalize(vec3_sub(next.pos, current.pos));
         let wp = vec3_normalize(vec3_sub(prev.pos, current.pos));
-        let pdf = mat.bsdf.pdf(wp, wn); //this needs tobe checked 
-        return convertDensity(current.pos, next.pos, next.normal, pdf)//this needs tobe cheked 
+        pdf = mat.bsdf.pdf(wp, wn); //this needs tobe checked 
+        return(convertDensity(current.pos, next.pos, next.normal, pdf))//this needs tobe cheked 
     }
 
     //Needs tobe checked 
-    fn pdfLightOrigin(current:Vertex, next:Vertex, light : DirectLightSample, choicePDF : f32){
+    fn pdfLightOrigin(current:Vertex, next:Vertex, light : DirectLightSample, choicePDF : f32) -> f32{
         let w = vec3_normalize(vec3_sub(next.pos, current.pos)); //currently Useless
         let pos_pdf = light.pdf_area;
         pos_pdf * choicePDF
     }
     //wrong because we need both materials!!
     //Check this!!
-    fn MISWeightS0(camBuf: DeviceBuffer, lightBuf: DeviceBuffer, pixel:i32, t:i32, pdfLightpick: f32, light: EmissionValue){
+    fn MISWeightS0(camBuf: DeviceBuffer, lightBuf: DeviceBuffer, pixel:i32, t:i32, pdfLightpick: f32, light: EmissionValue) -> f32{
         //The current size of one data point is 16 bytes (valid: i32 (0, 1): 0, material: i32: 1, pdfFwd: f32 : 2, pdfRev: f32: 3, pos: vec3 : 4, normal: vec3 : 7, beta: vec3 : 10, wo: vec3 : 13)
         let startCamBuff = 16 * pixel * max_path_len;
         let startLightBuf = 16 * pixel * max_path_len_light;
         let mut pt = if t > 0 {load_vertex(camBuf, startCamBuff + 16 * (t-1))} else {make_empty_Vertex()};
         let mut ptMinus = if t > 1 {load_vertex(camBuf, startCamBuff + 16 * (t-2))} else {make_empty_Vertex()};
 
-        let mut sumRi = 0.0;
+        let mut sumRi : f32 = 0.0;
 
-        let mut ri = 1.0;
+        let mut ri : f32 = 1.0;
 
-        if pt.valid && t - 1 > 1{
+        if pt.valid != 0 && t - 1 > 1{
             let ptPdfRev = pdfLightpick * light.pdf_area; //pdfLightOrigin
             ri *= ptPdfRev / pt.pdfFwd;
             sumRi += ri;
         }
-        if ptMinus.valid && t - 2 > 1{
-            let ptMinusPdfRev = pdfLight(pt, ptMinus, light);
+        if ptMinus.valid != 0 && t - 2 > 1{
+            let ptMinusPdfRev = pdfLightEmission(pt, ptMinus, light);
             ri *= ptMinusPdfRev / ptMinus.pdfFwd;
             sumRi += ri;
         }
@@ -190,11 +190,11 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
             sumRi += ri;
         }
 
-        return 1.0 / (1.0 + sumRi)
+        return(1.0 / (1.0 + sumRi))
     }
     //wrong because we need both materials!!
     //Check this!!
-    fn MISWeightS1(camBuf: DeviceBuffer, lightBuf: DeviceBuffer, pixel:i32, t:i32, light: DirectLightSample, mat: Material){
+    fn MISWeightS1(camBuf: DeviceBuffer, lightBuf: DeviceBuffer, pixel:i32, t:i32, light: DirectLightSample, mat: Material, sampled: Vertex) -> f32{
         //The current size of one data point is 16 bytes (valid: i32 (0, 1): 0, material: i32: 1, pdfFwd: f32 : 2, pdfRev: f32: 3, pos: vec3 : 4, normal: vec3 : 7, beta: vec3 : 10, wo: vec3 : 13)
         let startCamBuff = 16 * pixel * max_path_len;
         let startLightBuf = 16 * pixel * max_path_len_light;
@@ -202,16 +202,16 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
         let mut ptMinus = if t > 1 {load_vertex(camBuf, startCamBuff + 16 * (t-2))} else {make_empty_Vertex()};
         let qs = sampled;
 
-        let mut sumRi = 0.0;
+        let mut sumRi : f32 = 0.0;
 
-        let mut ri = 1.0;
+        let mut ri :f32 = 1.0;
 
-        if pt.valid && t - 1 > 1{
-            let ptPdfRev = pdfLight(qs, pt, light); //this is most likly wrong 
+        if pt.valid != 0 && t - 1 > 1{
+            let ptPdfRev = pdfLightDirect(qs, pt, light); //this is most likly wrong 
             ri *= ptPdfRev / pt.pdfFwd;
             sumRi += ri;
         }
-        if ptMinus.valid && t - 2 > 1{
+        if ptMinus.valid != 0 && t - 2 > 1{
             let ptMinusPdfRev = pdfConectionGround(pt, qs, ptMinus, mat);
             ri *= ptMinusPdfRev / ptMinus.pdfFwd;
             sumRi += ri;
@@ -229,11 +229,10 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
         ri *= qsPdfRev / qs.pdfFwd;
         sumRi += ri;
 
-        return 1.0 / (1.0 + sumRi)
+        return(1.0 / (1.0 + sumRi))
     }
     //wrong because we need both materials!!
-    fn MISWeight(camBuf: DeviceBuffer, lightBuf: DeviceBuffer, pixel:i32, s:i32, t:i32, mat: Material){
-        let sumRi : f32 = 0.0;
+    fn MISWeight(camBuf: DeviceBuffer, lightBuf: DeviceBuffer, pixel:i32, s:i32, t:i32, mat: Material) -> f32{
         let startCamBuff = 16 * pixel * max_path_len;
         let startLightBuf = 16 * pixel * max_path_len_light;
         // let current_buf_pos = buf_pos + pt.depth * 16;
@@ -242,18 +241,18 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
         let mut qsMinus = load_vertex(lightBuf, startLightBuf + 16 * (s-2));
         let mut ptMinus = if t > 1 {load_vertex(camBuf, startCamBuff + 16 * (t-2))} else {make_empty_Vertex()};
 
-        let mut sumRi = 0.0;
+        let mut sumRi : f32 = 0.0;
 
-        let mut ri = 1.0;
+        let mut ri :f32 = 1.0;
 
         //i think the ifs are useless
 
-        if pt.valid && t - 1 > 1{
+        if pt.valid != 0 && t - 1 > 1{
             let ptPdfRev = pdfConectionGround(qs, qsMinus, pt, mat); //this is most likly wrong 
             ri *= ptPdfRev / pt.pdfFwd;
             sumRi += ri;
         }
-        if ptMinus.valid && t - 2 > 1{
+        if ptMinus.valid != 0 && t - 2 > 1{
             let ptMinusPdfRev = pdfConectionGround(pt, qs, ptMinus, mat);
             ri *= ptMinusPdfRev / ptMinus.pdfFwd;
             sumRi += ri;
@@ -283,7 +282,7 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
             sumRi += ri;
         }
 
-        return 1.0 / (1.0 + sumRi)
+        return(1.0 / (1.0 + sumRi))
     }    
 
 
