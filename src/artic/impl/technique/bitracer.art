@@ -57,7 +57,6 @@ fn @make_light_renderer(buf: DeviceBuffer, max_path_len_light: i32) -> Technique
             let correctedRevPDF = convertDensity(current_pos, prev_pos, prev_normal, pdfRev);
 
             buf.store_f32(prev_buf_pos + 3, correctedRevPDF);
-
             buf.store_i32(buf_pos, pt.depth + 1); //this means the first pixel position indicates the depth
 
             //The current size of one data point is 16 bytes (valid: i32 (0, 1): 0, material: i32: 1, pdfFwd: f32 : 2, pdfRev: f32: 3, pos: vec3 : 4, normal: vec3 : 7, beta: vec3 : 10, wo: vec3 : 13)
