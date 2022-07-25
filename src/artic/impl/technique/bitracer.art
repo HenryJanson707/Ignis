@@ -41,8 +41,10 @@ fn @make_light_renderer(buf: DeviceBuffer, max_path_len_light: i32) -> Technique
             let prev_buf_pos = buf_pos + (pt.depth - 1) * 16;
 
             if pt.depth == 1{ //TODO we assume here that the fist hit is state.dpeth == 1 this has to be tested
-                pdfFwd     = buf.load_f32(current_buf_pos + 2);
-                beta       = vec3_to_color(buf.load_vec3(current_buf_pos + 10));
+                let start_vertex = load_vertex(buf, current_buf_pos);  
+
+                pdfFwd     = start_vertex.pdfFwd;
+                beta       = start_vertex.beta;
             }
 
             let pdfRev = mat.bsdf.pdf(mat_sample.in_dir, wo); //this could be wrong!!!!
@@ -50,23 +52,19 @@ fn @make_light_renderer(buf: DeviceBuffer, max_path_len_light: i32) -> Technique
             let current_pos     = surf.point;
             let current_normal  = surf.face_normal;
 
-            let prev_pos        = buf.load_vec3(prev_buf_pos + 4);
-            let prev_normal     = buf.load_vec3(prev_buf_pos + 7); 
+            let prev_vertex = load_vertex(buf, prev_buf_pos);
+
+            let prev_pos        = prev_vertex.pos;
+            let prev_normal     = prev_vertex.normal;
 
             let correctedFwdPDF = convertDensity(prev_pos, current_pos, current_normal, pdfFwd);
             let correctedRevPDF = convertDensity(current_pos, prev_pos, prev_normal, pdfRev);
 
-            buf.store_f32(prev_buf_pos + 3, correctedRevPDF);
-            buf.store_i32(buf_pos, pt.depth + 1); //this means the first pixel position indicates the depth
+            store_vertex_pdfRev(buf, prev_buf_pos, correctedRevPDF);
+            store_vertex_valid(buf, buf_pos, pt.depth + 1);//this means the first pixel position indicates the depth
 
             //The current size of one data point is 16 bytes (valid: i32 (0, 1): 0, material: i32: 1, pdfFwd: f32 : 2, pdfRev: f32: 3, pos: vec3 : 4, normal: vec3 : 7, beta: vec3 : 10, wo: vec3 : 13)
-            buf.store_int2(current_buf_pos, 1, -1); //currently no material
-            buf.store_f32(current_buf_pos + 2, correctedFwdPDF);
-            buf.store_f32(current_buf_pos + 3, 0.0);
-            buf.store_vec3(current_buf_pos + 4, current_pos);
-            buf.store_vec3(current_buf_pos + 7, current_normal);
-            buf.store_vec3(current_buf_pos + 10, color_to_vec3(beta));
-            buf.store_vec3(current_buf_pos + 13, wo);
+            store_vertex_data(buf, current_buf_pos, 1, -1, correctedFwdPDF, 0.0, current_pos, current_normal, beta, wo);
             
             // if(pixel == 234551 && pt.depth < 3){
             //     print_string("Light_Bounce");
