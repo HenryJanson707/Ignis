@@ -20,8 +20,8 @@ fn @make_light_camera(tmin: f32, tmax: f32, buf: DeviceBuffer, num_lights: i32, 
             let pdfRev : f32    = 0.0;
             let pdf             = cos_light / (light_sample.pdf_area * light_sample.pdf_dir * pdf_pick);
             let pos             = light_sample.pos;
-            let intensity       = color_to_vec3(light_sample.intensity);
-            let beta            = vec3_mulf(intensity, pdf);
+            let intensity       = light_sample.intensity;
+            let beta            = color_mulf(intensity, pdf);
             let wo              = make_vec3(0, 0, 0); //This should be fine because its s=1 wich never is called
             let dir             = light_sample.dir;
             let normal          = dir; //check if this is fine???
@@ -42,16 +42,10 @@ fn @make_light_camera(tmin: f32, tmax: f32, buf: DeviceBuffer, num_lights: i32, 
             //     print_flush();
             // }
             //The current size of one data point is 16 bytes (valid: i32 (0, 1): 0, material: i32: 1, pdfFwd: f32 : 2, pdfRev: f32: 3, pos: vec3 : 4, normal: vec3 : 7, beta: vec3 : 10, wo: vec3 : 13)
-            buf.store_int2(current_pos, 1, -1); //Has the light a material???
-            buf.store_f32(current_pos + 2, pdfFwd);
-            buf.store_f32(current_pos + 3, pdfRev);
-            buf.store_vec3(current_pos + 4, pos);
-            buf.store_vec3(current_pos + 7, normal);
-            buf.store_vec3(current_pos + 10, intensity);
-            buf.store_vec3(current_pos + 13, wo);
-
-            buf.store_f32(next_pos + 2, pdfFwd2);
-            buf.store_vec3(next_pos + 10, beta);
+            store_vertex_data(buf, current_pos, 1, -1, pdfFwd, pdfRev, pos, normal, intensity, wo);
+            
+            store_vertex_pdfFwd(buf, next_pos, pdfFwd2);
+            store_vertex_Beta(buf, next_pos, beta);
             make_ray(pos, dir, tmin, tmax)
         }
     }
