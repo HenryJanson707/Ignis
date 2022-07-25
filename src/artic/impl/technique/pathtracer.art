@@ -20,56 +20,6 @@ struct PTRayPayload {
     eta:     f32
 }
 
-struct Vertex {
-    //The current size of one data point is 16 bytes (valid: i32 (0, 1): 0, material: i32: 1, pdfFwd: f32 : 2, pdfRev: f32: 3, pos: vec3 : 4, normal: vec3 : 7, beta: vec3 : 10, wo: vec3 : 13)
-    valid:  i32,
-    mat:    i32,
-    pdfFwd: f32,
-    pdfRev: f32,
-    pos:    Vec3,
-    normal: Vec3,
-    beta:   Color,
-    wo:     Vec3
-}
-
-fn @make_empty_Vertex() -> Vertex{
-   Vertex {
-       valid =      0,
-       mat =        0,
-       pdfFwd =     0.0,
-       pdfRev =     0.0,
-       pos =        make_vec3(0.0, 0.0, 0.0),
-       normal =     make_vec3(0.0, 0.0, 0.0),
-       beta =       make_color(0.0, 0.0, 0.0, 0.0),
-       wo =         make_vec3(0.0, 0.0, 0.0)
-   } 
-}
-
-fn @load_vertex(buf: DeviceBuffer, bufPos: i32) -> Vertex{
-    //The current size of one data point is 16 bytes (valid: i32 (0, 1): 0, material: i32: 1, pdfFwd: f32 : 2, pdfRev: f32: 3, pos: vec3 : 4, normal: vec3 : 7, beta: vec3 : 10, wo: vec3 : 13)
-    Vertex {
-        valid =     buf.load_i32(bufPos),
-        mat =       buf.load_i32(bufPos + 1),
-        pdfFwd =    buf.load_f32(bufPos + 2),
-        pdfRev =    buf.load_f32(bufPos + 3),
-        pos =       buf.load_vec3(bufPos + 4),
-        normal =    buf.load_vec3(bufPos + 7),
-        beta =      vec3_to_color(buf.load_vec3(bufPos + 10)),
-        wo =        buf.load_vec3(bufPos + 13)
-    }
-}
-
-fn @store_vertex(buf: DeviceBuffer, bufPos: i32, vertex: Vertex){
-    buf.store_int2(bufPos, vertex.valid, vertex.mat);
-    buf.store_f32(bufPos + 2, vertex.pdfFwd);
-    buf.store_f32(bufPos + 3, vertex.pdfRev);
-    buf.store_vec3(bufPos + 4, vertex.pos);
-    buf.store_vec3(bufPos + 7, vertex.normal);
-    buf.store_vec3(bufPos + 10, color_to_vec3(vertex.beta));
-    buf.store_vec3(bufPos + 13, vertex.wo);
-}
-
-
 static AOV_PATH_NORMAL = 1;
 static AOV_PATH_DIRECT = 2;
 static AOV_PATH_NEE    = 3;
@@ -186,7 +136,9 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
 
         for i in range_step(t-3, 1, -1){
             //this just seems wrong
-            ri *= camBuf.load_f32(startCamBuff + 16 * i + 3) / camBuf.load_f32(startCamBuff + 16 * i + 2);
+            //ri *= camBuf.load_f32(startCamBuff + 16 * i + 3) / camBuf.load_f32(startCamBuff + 16 * i + 2);
+            //This is most likly wrong
+            ri *= load_vertex_pdfRev(camBuf, startCamBuff + 16 * i) / load_vertex_pdfFwd(camBuf, startCamBuff + 16 * i);
             sumRi += ri;
         }
 
@@ -219,7 +171,9 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
 
         for i in range_step(t-3, 1, -1){
             //this just seems wrong
-            ri *= camBuf.load_f32(startCamBuff + 16 * i + 3) / camBuf.load_f32(startCamBuff + 16 * i + 2);
+            //ri *= camBuf.load_f32(startCamBuff + 16 * i + 3) / camBuf.load_f32(startCamBuff + 16 * i + 2);
+            //This is most likly wrong
+            ri *= load_vertex_pdfRev(camBuf, startCamBuff + 16 * i) / load_vertex_pdfFwd(camBuf, startCamBuff + 16 * i);
             sumRi += ri;
         }
 
@@ -260,7 +214,9 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
 
         for i in range_step(t-3, 1, -1){
             //this just seems wrong
-            ri *= camBuf.load_f32(startCamBuff + 16 * i + 3) / camBuf.load_f32(startCamBuff + 16 * i + 2);
+            //ri *= camBuf.load_f32(startCamBuff + 16 * i + 3) / camBuf.load_f32(startCamBuff + 16 * i + 2);
+            //This is most likly wrong
+            ri *= load_vertex_pdfRev(camBuf, startCamBuff + 16 * i) / load_vertex_pdfFwd(camBuf, startCamBuff + 16 * i);
             sumRi += ri;
         }
 
@@ -278,7 +234,9 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
         for i in range_step(t-3, -1, -1){
             //this just seems wrong 
             //there might be a mistake here because of the case 0
-            ri *= lightBuf.load_f32(startLightBuf + 16 * i + 3) / lightBuf.load_f32(startLightBuf + 16 * i + 2);
+            //ri *= lightBuf.load_f32(startLightBuf + 16 * i + 3) / lightBuf.load_f32(startLightBuf + 16 * i + 2);
+            //This is most likly wrong
+            ri *= load_vertex_pdfRev(lightBuf, startLightBuf + 16 * i) / load_vertex_pdfFwd(lightBuf, startLightBuf + 16 * i); //Extra check here
             sumRi += ri;
         }
 
@@ -308,7 +266,7 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
         let light_buf_pos  = 16 * pixel * max_path_len_light;
         let camera_buf_pos = 16 * pixel * max_path_len;
 
-        let light_path_len = buf.load_i32(light_buf_pos);
+        let light_path_len = load_vertex_valid(buf, light_buf_pos);
 
         let choice = if light_path_len == 0 {1} else {pick_light_id(rnd, light_path_len) + 1};
         let s = choice;
@@ -371,11 +329,13 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
             let camera_beta = pt.contrib;
 
             let light_buf_pos_corrected = light_buf_pos + 16 * (s - 1);
+
+            let light_vertex = load_vertex(buf, light_buf_pos_corrected);
             //The current size of one data point is 16 bytes (valid: i32 (0, 1): 0, material: i32: 1, pdfFwd: f32 : 2, pdfRev: f32: 3, pos: vec3 : 4, normal: vec3 : 7, beta: vec3 : 10, wo: vec3 : 13)
-            let light_pos = buf.load_vec3(light_buf_pos_corrected + 4);
-            let light_normal = buf.load_vec3(light_buf_pos_corrected + 7);
-            let light_beta = vec3_to_color(buf.load_vec3(light_buf_pos_corrected + 10));
-            let light_wi = buf.load_vec3(light_buf_pos_corrected + 13);
+            let light_pos = light_vertex.pos;
+            let light_normal = light_vertex.normal;
+            let light_beta = light_vertex.beta;
+            let light_wi = light_vertex.wo;
 
             let light_dir = vec3_sub(light_pos, camera_pos);
             let light_dist = vec3_len(light_dir);
@@ -565,28 +525,24 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
             let mut correctedFwdPDF : f32 = 0.0;
             let mut correctedRevPDF : f32 = 0.0;
             
-            let prev_pos        = buf.load_vec3(prev_buf_pos + 4);
-            let prev_normal     = buf.load_vec3(prev_buf_pos + 7); 
+            let prev_vertex     = load_vertex(camera_buf, prev_buf_pos);
+
+            let prev_pos        = prev_vertex.pos;
+            let prev_normal     = prev_vertex.normal;
             
             let pdfRev = mat.bsdf.pdf(mat_sample.in_dir, wo); //this could be wrong!!!!
 
             //TODO this seems to be a wrong way of handeling this problem
             if(pt.depth != 1){
-                let prev_pos = camera_buf.load_vec3(prev_buf_pos + 4);
+                let prev_pos = load_vertex_Pos(camera_buf, prev_buf_pos);
                 correctedFwdPDF = convertDensity(prev_pos, current_pos, current_normal, pdfFwd);
                 correctedRevPDF = convertDensity(current_pos, prev_pos, prev_normal, pdfRev);
             }
 
-            camera_buf.store_f32(prev_buf_pos + 3, correctedRevPDF);
+            store_vertex_pdfRev(camera_buf, prev_buf_pos, correctedRevPDF);
             //The current size of one data point is 16 bytes (valid: i32 (0, 1): 0, material: i32: 1, pdfFwd: f32 : 2, pdfRev: f32: 3, pos: vec3 : 4, normal: vec3 : 7, beta: vec3 : 10, wo: vec3 : 13)
-            camera_buf.store_int2(current_buf_pos, 1, -1);
-            camera_buf.store_f32(current_buf_pos + 2, correctedFwdPDF);
-            camera_buf.store_f32(current_buf_pos + 3, 0.0);
-            camera_buf.store_vec3(current_buf_pos + 4, current_pos);
-            camera_buf.store_vec3(current_buf_pos + 7, current_normal);
-            camera_buf.store_vec3(current_buf_pos + 10, color_to_vec3(beta));
-            camera_buf.store_vec3(current_buf_pos + 13, wo);
-
+            store_vertex_data(camera_buf, current_buf_pos, 1, -1, correctedFwdPDF, 0.0, current_pos, current_normal, beta, wo);
+            
             // if(pixel == 468613){
             //     print_string("\n");
             //     print_i32(pt.depth);
