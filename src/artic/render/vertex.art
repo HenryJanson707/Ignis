@@ -32,8 +32,8 @@ fn @load_vertex(buf: DeviceBuffer, bufPos: i32) -> Vertex{
     let forth   = buf.load_vec4(bufPos + 12);
     
     Vertex {
-        valid =     bitcast[i32](first.x),
-        mat =       bitcast[i32](second.x),
+        valid =     first.x as i32,
+        mat =       second.x as i32,
         pdfFwd =    third.x,
         pdfRev =    forth.x,
         pos =       make_vec3(first.y, first.z, first.w),
@@ -44,8 +44,8 @@ fn @load_vertex(buf: DeviceBuffer, bufPos: i32) -> Vertex{
 }
 
 fn @store_vertex(buf: DeviceBuffer, bufPos: i32, vertex: Vertex){
-    let first   = make_vec4(bitcast[f32](vertex.valid), vertex.pos.x, vertex.pos.y, vertex.pos.z);
-    let second  = make_vec4(bitcast[f32](vertex.mat), vertex.normal.x, vertex.normal.y, vertex.normal.z);
+    let first   = make_vec4(vertex.valid as f32, vertex.pos.x, vertex.pos.y, vertex.pos.z);
+    let second  = make_vec4(vertex.mat as f32, vertex.normal.x, vertex.normal.y, vertex.normal.z);
     let third   = make_vec4(vertex.pdfFwd, vertex.beta.r, vertex.beta.g, vertex.beta.b);
     let forth   = make_vec4(vertex.pdfRev, vertex.wo.x, vertex.wo.y, vertex.wo.z);
 
@@ -56,8 +56,8 @@ fn @store_vertex(buf: DeviceBuffer, bufPos: i32, vertex: Vertex){
 }
 
 fn @store_vertex_data(buf: DeviceBuffer, bufPos: i32, valid: i32, mat: i32, pdfFwd: f32, pdfRev: f32, pos: Vec3, normal: Vec3, beta: Color, wo: Vec3){
-    let first   = make_vec4(bitcast[f32](valid), pos.x, pos.y, pos.z);
-    let second  = make_vec4(bitcast[f32](mat), normal.x, normal.y, normal.z);
+    let first   = make_vec4(valid as f32, pos.x, pos.y, pos.z);
+    let second  = make_vec4(mat as f32, normal.x, normal.y, normal.z);
     let third   = make_vec4(pdfFwd, beta.r, beta.g, beta.b);
     let forth   = make_vec4(pdfRev, wo.x, wo.y, wo.z);
 
@@ -69,12 +69,12 @@ fn @store_vertex_data(buf: DeviceBuffer, bufPos: i32, valid: i32, mat: i32, pdfF
 
 fn @load_vertex_valid(buf: DeviceBuffer, bufPos: i32) -> i32{
     let data = buf.load_vec4(bufPos);
-    bitcast[i32](data.x)
+    data.x as i32
 }
 
 fn @load_vertex_mat(buf: DeviceBuffer, bufPos: i32) -> i32{
     let data = buf.load_vec4(bufPos + 4);
-    bitcast[i32](data.x)
+    data.x as i32
 }
 
 fn @load_vertex_pdfFwd(buf: DeviceBuffer, bufPos: i32) -> f32{
@@ -110,12 +110,12 @@ fn @load_vertex_Wo(buf: DeviceBuffer, bufPos: i32) -> Vec3{
 
 fn @store_vertex_valid(buf: DeviceBuffer, bufPos: i32, data: i32){
     let old_data = buf.load_vec4(bufPos);
-    buf.store_vec4(bufPos, make_vec4(bitcast[f32](data), old_data.y, old_data.z, old_data.w))
+    buf.store_vec4(bufPos, make_vec4(data as f32, old_data.y, old_data.z, old_data.w))
 }
 
 fn @store_vertex_mat(buf: DeviceBuffer, bufPos: i32, data: i32){
     let old_data = buf.load_vec4(bufPos + 4);
-    buf.store_vec4(bufPos + 4, make_vec4(bitcast[f32](data), old_data.y, old_data.z, old_data.w))
+    buf.store_vec4(bufPos + 4, make_vec4(data as f32, old_data.y, old_data.z, old_data.w))
 }
 
 fn @store_vertex_pdfFwd(buf: DeviceBuffer, bufPos: i32, data: f32){
