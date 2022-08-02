@@ -38,7 +38,7 @@ static void bi_body_loader(std::ostream& stream, const std::string&, const std::
 {
     stream << "  let (film_width, film_height) = device.get_film_size();" << std::endl;
     stream << "  let max_depth_light = 5;" << std::endl;
-    stream << "  let buf_size = film_width * film_height * 4 * max_depth_light * 16;" << std::endl;
+    stream << "  let buf_size = film_width * film_height * max_depth_light * 16;" << std::endl;
     stream << "  let buf = device.request_buffer(\"bi\", buf_size, 0);" << std::endl;
     stream << "  let technique = make_light_renderer(buf, max_depth_light);" << std::endl;
 }
@@ -132,7 +132,7 @@ static TechniqueInfo path_get_info(const std::string&, const std::shared_ptr<Par
         stream << "  let spp = " << ctx.SamplesPerIteration << " : i32;" << std::endl;
         //The Buffer Size is far too big!!
         stream << "  let max_depth_light = 5;" << std::endl;
-        stream << "  let buf_size = film_width * film_height * 4 * max_depth_light * 16;" << std::endl; //TODO Find a better to set a max depth
+        stream << "  let buf_size = film_width * film_height * max_depth_light * 16;" << std::endl; //TODO Find a better to set a max depth
         stream << "  let buf = device.request_buffer(\"bi\", buf_size, 0);" << std::endl;
         stream << "  let offset:f32 = 0.001;" << std::endl; //TODO find a better way to define this
         stream << "  let camera = make_light_camera(" << std::endl;
@@ -164,7 +164,7 @@ static void path_body_loader(std::ostream& stream, const std::string&, const std
 {
     stream << "  let (film_width, film_height) = device.get_film_size();" << std::endl;
     stream << "  let max_depth_light = 5;" << std::endl;
-    stream << "  let buf_size = film_width * film_height * 4 * max_depth_light * 16;" << std::endl;
+    stream << "  let buf_size = film_width * film_height * max_depth_light * 16;" << std::endl;
     stream << "  let buf = device.request_buffer(\"bi\", buf_size, 0);" << std::endl;
 
     const int max_depth     = technique ? technique->property("max_depth").getInteger(64) : 64;
@@ -174,7 +174,7 @@ static void path_body_loader(std::ostream& stream, const std::string&, const std
     const bool hasStatsAOV  = technique ? technique->property("aov_stats").getBool(false) : false;
     
     if(ctx.CurrentTechniqueVariant == 0){
-        stream << "  let buf_size_camera = film_width * film_height * 4 * " << max_depth << " * 16;" << std::endl;
+        stream << "  let buf_size_camera = film_width * film_height * " << max_depth << " * 16;" << std::endl;
         stream << "  let buf_camera = device.request_buffer(\"camera\", buf_size_camera, 0);" << std::endl;
         size_t counter = 1;
         if (hasNormalAOV)
