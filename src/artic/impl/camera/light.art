@@ -42,7 +42,7 @@ fn @make_light_camera(tmin: f32, tmax: f32, buf: DeviceBuffer, num_lights: i32, 
             //     print_flush();
             // }
             //The current size of one data point is 16 bytes (valid: i32 (0, 1): 0, material: i32: 1, pdfFwd: f32 : 2, pdfRev: f32: 3, pos: vec3 : 4, normal: vec3 : 7, beta: vec3 : 10, wo: vec3 : 13)
-            store_vertex_data(buf, current_pos, 1, -1, pdfFwd, pdfRev, pos, normal, intensity, wo);
+            store_vertex_data(buf, current_pos, 0, -1, pdfFwd, pdfRev, pos, normal, intensity, wo);
             
             store_vertex_pdfFwd(buf, next_pos, pdfFwd2);
             store_vertex_Beta(buf, next_pos, beta);

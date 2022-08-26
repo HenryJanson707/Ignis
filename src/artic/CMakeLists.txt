@@ -96,6 +96,7 @@ set(ARTIC_EXTRA_SRC
     ${CMAKE_CURRENT_SOURCE_DIR}/impl/sampling.art
     ${CMAKE_CURRENT_SOURCE_DIR}/impl/shading.art
     ${CMAKE_CURRENT_SOURCE_DIR}/impl/warp.art
+    ${CMAKE_CURRENT_SOURCE_DIR}/render/vertex.art
 )
 
 set(ARTIC_MAIN_SRC ${ARTIC_MAIN_SRC} PARENT_SCOPE)
