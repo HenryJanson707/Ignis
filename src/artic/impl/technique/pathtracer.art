@@ -149,6 +149,10 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
             sumRi += ri;
             i -= 1;
         }
+
+        // if(t == 2){
+        //     print_f32(pt.pdfFwd);
+        // }
         
         // for i in range_step(t-3, 1, -1){
         //     //this just seems wrong
@@ -180,11 +184,17 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
             ri *= ptPdfRev / pt.pdfFwd;
             sumRi += ri;
         }
+
         if ptMinus.valid != 0 && t - 2 > 1{
             let ptMinusPdfRev = pdfConectionGround(pt, qs, ptMinus, mat);
             ri *= ptMinusPdfRev / ptMinus.pdfFwd;
             sumRi += ri;
         }
+        // if sumRi < 0.000001{
+        //     print_string("\n");
+        //     print_i32(t);
+        //     print_string("\n");
+        // }
 
         //this could be wrong???
         let mut i = t-3;
@@ -193,6 +203,11 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
             sumRi += ri;
             i -= 1;
         }
+
+
+        // print_string("\n");
+        // print_f32(sumRi);
+        // print_string("\n");
 
         // for i in range_step(t-3, 1, -1){
         //     //this just seems wrong
@@ -302,9 +317,10 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
 
         let choice = if light_path_len == 0 {1} else {pick_light_id(rnd, light_path_len) + 1};
         //let s = if light_path_len >= 2 {2} else {0}; //important currently there is no choice here!!!!
-        let s = 1;
+        let s = 0;
         //let s = 2;
         //let s = 1;
+        let t = pt.depth;
         if s == 1{
             let light_id      = pick_light_id(rnd, num_lights);
             let light         = @lights(light_id);//sollte eventuel wie im normalen pathtracer angepasst werden!!
@@ -349,6 +365,23 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
                     //     print_f32(1/light_dist2);
                     //     print_string("\n");
                     // }
+                    //There are some felds missing like normal and dir is that important?????
+                    let mut sampled = make_empty_Vertex();
+                    sampled.valid = 1;
+                    sampled.pos = light_sample.posdir;
+                    sampled.beta = light_beta;
+                    let mut pt = make_empty_Vertex();
+                    //this should be enuqgh but im not quit shoure 
+                    pt.valid = 1;
+                    pt.pos = surf.point;
+                    //we neeed pt wich should be the current Vertex??
+                    sampled.pdfFwd = pdfLightOrigin(sampled, pt, light_sample, pdf_lightpick);//is the order corect here?//and dont we need corection
+                    //i hope we dont need the normal!!!!
+
+                    let mis = MISWeightS1(camera_buf, buf, pixel, t, light_sample, mat, sampled);
+                    // print_string("\n");
+                    // print_f32(mis);
+                    // print_string("\n");
                     return(make_simple_shadow_ray(
                         make_ray(surf.point, light_dir, offset, 1 - offset),
                         contri
@@ -475,7 +508,7 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
                 let current_pos = surf.point;
                 let current_light = mat.emission(current_pos);
                 let contrib = color_mul(pt.contrib, emit.intensity);
-                let mis = MISWeightS0(buf, camera_buf, pixel, pt.depth, pdf_lightpick, current_light); //the pt.depth thing is motlikly wrong
+                let mis = MISWeightS0(camera_buf, buf, pixel, pt.depth, pdf_lightpick, current_light); //the pt.depth thing is motlikly wrong
                 // if mis < 0.000001{
                 //     print_string("\n");
                 //     print_i32(pt.depth);
@@ -483,9 +516,9 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
                 //     print_f32(mis);
                 //     print_string("\n");
                 // }
-                //return(make_option(color_mulf(contrib,mis)))
+                return(make_option(color_mulf(contrib,mis)))
                 //return(make_option(contrib))
-                return(Option[Color]::None)
+                //return(Option[Color]::None)
                 // if pt.depth == 1{
                 //     return(make_option(contrib))
                 // }else{
@@ -553,7 +586,8 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
 
         if let Option[BsdfSample]::Some(mat_sample) = mat.bsdf.sample(rnd, wo, false) {
             let beta = pt.contrib;
-            let pdfFwd = pt.mis;
+            //it need to retestet if the first pdfFwd = 1.0 ist!!!
+            let pdfFwd = if pt.depth == 1 {1.0} else {pt.mis}; //this seems wrong but it could work????
             
             // let rr_prob = russian_roulette_pbrt(color_mulf(pt.contrib, pt.eta * pt.eta), 0.95);
             // if pt.depth + 1 > max_path_len || randf(rnd) >= rr_prob {
@@ -589,6 +623,10 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
             store_vertex_pdfRev(camera_buf, prev_buf_pos, correctedRevPDF);
             //The current size of one data point is 16 bytes (valid: i32 (0, 1): 0, material: i32: 1, pdfFwd: f32 : 2, pdfRev: f32: 3, pos: vec3 : 4, normal: vec3 : 7, beta: vec3 : 10, wo: vec3 : 13)
             store_vertex_data(camera_buf, current_buf_pos, 1, -1, correctedFwdPDF, 0.0, current_pos, current_normal, beta, wo);
+
+            // if pt.depth == 1{
+            //     print_f32(pdfFwd);
+            // }
             
             // if(pixel == 468613){
             //     print_string("\n");
