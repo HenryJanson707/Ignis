@@ -506,7 +506,7 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
 
         let beta = pt.contrib;
         //it need to retestet if the first pdfFwd = 1.0 ist!!!
-        let pdfFwd = if pt.depth == 1 {1.0} else {pt.mis}; //this seems wrong but it could work????
+        let pdfFwd = if pt.depth == 1 {1.0} else {pt.mis}; //this seems wrong but it could work???? 
         
         // let rr_prob = russian_roulette_pbrt(color_mulf(pt.contrib, pt.eta * pt.eta), 0.95);
         // if pt.depth + 1 > max_path_len || randf(rnd) >= rr_prob {
@@ -524,7 +524,7 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
         
         
         let prev_vertex     = load_vertex(camera_buf, prev_buf_pos);
-        let prev_pos        = if pt.depth == 1 {ray.org} else {prev_vertex.pos}; //this should fix the problem with pt.depth == 0 problem but is not the best way!!
+        let prev_pos        = if pt.depth == 1 {ray.org} else {prev_vertex.pos}; //this should fix the problem with pt.depth == 0 problem but is not the best way!! //this has tobe checked again
         
         //Currently this is wrong because 0 prev_pos is wrong because its not currently known for pt.depth = 0
         let mut correctedFwdPDF = convertDensity(prev_pos, current_pos, current_normal, pdfFwd);
@@ -650,7 +650,7 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
 
             let prev_vertex     = load_vertex(camera_buf, prev_buf_pos);
 
-            let prev_pos        = prev_vertex.pos;
+            let prev_pos        = if pt.depth == 1 {ray.org} else {prev_vertex.pos};//this has tobe checked again
             let prev_normal     = prev_vertex.normal;
 
             let mut correctedRevPDF : f32 = 0.0;
