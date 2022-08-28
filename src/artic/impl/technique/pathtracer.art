@@ -150,8 +150,10 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
             i -= 1;
         }
 
-        // if(t == 2){
-        //     print_f32(pt.pdfFwd);
+        // if(t == 3){
+        //     print_string("\n");
+        //     print_f32(sumRi);
+        //     print_string("\n");
         // }
         
         // for i in range_step(t-3, 1, -1){
@@ -487,6 +489,7 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
               , mat: Material
               ) -> Option[Color] {
         let pt = unwrap_ptraypayload(payload);
+        let t = pt.depth + 1;
         // if pt.depth == 1 {
         //     aov_normal.splat(pixel, make_color(math_builtins::fabs(surf.local.col(2).x),
         //                                        math_builtins::fabs(surf.local.col(2).y),
@@ -560,7 +563,9 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
                 let current_pos = surf.point;
                 let current_light = mat.emission(current_pos);
                 let contrib = color_mul(pt.contrib, emit.intensity);
-                let mis = MISWeightS0(camera_buf, buf, pixel, pt.depth, pdf_lightpick, current_light); //the pt.depth thing is motlikly wrong
+                let mis = MISWeightS0(camera_buf, buf, pixel, t, pdf_lightpick, current_light); //the pt.depth thing is motlikly wrong
+
+                
                 // if mis < 0.000001{
                 //     print_string("\n");
                 //     print_i32(pt.depth);
@@ -568,8 +573,8 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
                 //     print_f32(mis);
                 //     print_string("\n");
                 // }
-                //return(make_option(color_mulf(contrib,mis)))
-                return(make_option(contrib))
+                return(make_option(color_mulf(contrib,mis)))
+                //return(make_option(contrib))
                 //return(Option[Color]::None)
                 // if pt.depth == 1{
                 //     return(make_option(contrib))
