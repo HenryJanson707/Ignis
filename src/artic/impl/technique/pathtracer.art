@@ -493,6 +493,58 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
         //                                        math_builtins::fabs(surf.local.col(2).z),
         //                                        1));
         // }
+        
+        // if pt.depth == 1 && pixel == 186791{
+        //     print_string("\n");
+        //     print_f32(ray.org.z);
+        //     print_string("\n");
+        // }
+
+
+        let wo = vec3_neg(ray.dir);
+        let buf_pos = 16 * pixel * max_path_len;
+
+        let beta = pt.contrib;
+        //it need to retestet if the first pdfFwd = 1.0 ist!!!
+        let pdfFwd = if pt.depth == 1 {1.0} else {pt.mis}; //this seems wrong but it could work????
+        
+        // let rr_prob = russian_roulette_pbrt(color_mulf(pt.contrib, pt.eta * pt.eta), 0.95);
+        // if pt.depth + 1 > max_path_len || randf(rnd) >= rr_prob {
+        //     return(Option[(Ray, RayPayload)]::None)
+        // }
+        
+        let current_buf_pos = buf_pos + pt.depth * 16;
+        let prev_buf_pos = buf_pos + (pt.depth - 1) * 16;
+        // let contrib     = color_mul(pt.contrib, mat_sample.color/* Pdf and cosine are already applied!*/);
+        // let mis         = if mat.bsdf.is_specular { 0 } else { 1 / mat_sample.pdf };
+        // let new_contrib = color_mulf(contrib, 1 / rr_prob);
+
+        let current_pos = surf.point;
+        let current_normal = surf.face_normal;
+        
+        
+        let prev_vertex     = load_vertex(camera_buf, prev_buf_pos);
+        let prev_pos        = if pt.depth == 1 {ray.org} else {prev_vertex.pos}; //this should fix the problem with pt.depth == 0 problem but is not the best way!!
+        
+        //Currently this is wrong because 0 prev_pos is wrong because its not currently known for pt.depth = 0
+        let mut correctedFwdPDF = convertDensity(prev_pos, current_pos, current_normal, pdfFwd);
+
+        //TODO this seems to be a wrong way of handeling this problem
+
+        //The current size of one data point is 16 bytes (valid: i32 (0, 1): 0, material: i32: 1, pdfFwd: f32 : 2, pdfRev: f32: 3, pos: vec3 : 4, normal: vec3 : 7, beta: vec3 : 10, wo: vec3 : 13)
+        
+        let current_vertex = Vertex {
+            valid =      1,
+            mat =        -1,
+            pdfFwd =     correctedFwdPDF,
+            pdfRev =     0.0,
+            pos =        current_pos,
+            normal =     current_normal,
+            beta =       beta,
+            wo =         wo
+        };
+        store_vertex(camera_buf, current_buf_pos, current_vertex);
+        //store_vertex_data(camera_buf, current_buf_pos, 1, -1, correctedFwdPDF, 0.0, current_pos, current_normal, beta, wo);
 
         // Hits on a light source
         if mat.is_emissive && surf.is_entering {
@@ -516,8 +568,8 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
                 //     print_f32(mis);
                 //     print_string("\n");
                 // }
-                return(make_option(color_mulf(contrib,mis)))
-                //return(make_option(contrib))
+                //return(make_option(color_mulf(contrib,mis)))
+                return(make_option(contrib))
                 //return(Option[Color]::None)
                 // if pt.depth == 1{
                 //     return(make_option(contrib))
@@ -578,73 +630,37 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
         if pt.depth >= max_path_len {
             return(Option[(Ray, RayPayload)]::None)
         }
+
+        let buf_pos = 16 * pixel * max_path_len;
+        let prev_buf_pos = buf_pos + (pt.depth - 1) * 16;
+
         //print_i32(pt.depth);
         // aov_stats.splat(pixel, make_color(if pt.depth == 1 { 2 } else { 1 }, 0, 0));
         // Bounce
         let wo = vec3_neg(ray.dir);
-        let buf_pos = 16 * pixel * max_path_len;
+        let beta = pt.contrib;
+        let current_pos = surf.point;
 
         if let Option[BsdfSample]::Some(mat_sample) = mat.bsdf.sample(rnd, wo, false) {
-            let beta = pt.contrib;
-            //it need to retestet if the first pdfFwd = 1.0 ist!!!
-            let pdfFwd = if pt.depth == 1 {1.0} else {pt.mis}; //this seems wrong but it could work????
-            
-            // let rr_prob = russian_roulette_pbrt(color_mulf(pt.contrib, pt.eta * pt.eta), 0.95);
-            // if pt.depth + 1 > max_path_len || randf(rnd) >= rr_prob {
-            //     return(Option[(Ray, RayPayload)]::None)
-            // }
-            
-            let current_buf_pos = buf_pos + pt.depth * 16;
-            let prev_buf_pos = buf_pos + (pt.depth - 1) * 16;
-            // let contrib     = color_mul(pt.contrib, mat_sample.color/* Pdf and cosine are already applied!*/);
-            // let mis         = if mat.bsdf.is_specular { 0 } else { 1 / mat_sample.pdf };
-            // let new_contrib = color_mulf(contrib, 1 / rr_prob);
-
-            let current_pos = surf.point;
-            let current_normal = surf.face_normal;
-            
-            let mut correctedFwdPDF : f32 = 0.0;
-            let mut correctedRevPDF : f32 = 0.0;
-            
-            let prev_vertex     = load_vertex(camera_buf, prev_buf_pos);
-
-            let prev_pos        = prev_vertex.pos;
-            let prev_normal     = prev_vertex.normal;
-            
-            let pdfRev = mat.bsdf.pdf(mat_sample.in_dir, wo); //this could be wrong!!!!
-
-            //TODO this seems to be a wrong way of handeling this problem
-            if(pt.depth != 1){
-                let prev_pos = load_vertex_Pos(camera_buf, prev_buf_pos);
-                correctedFwdPDF = convertDensity(prev_pos, current_pos, current_normal, pdfFwd);
-                correctedRevPDF = convertDensity(current_pos, prev_pos, prev_normal, pdfRev);
-            }
-
-            store_vertex_pdfRev(camera_buf, prev_buf_pos, correctedRevPDF);
-            //The current size of one data point is 16 bytes (valid: i32 (0, 1): 0, material: i32: 1, pdfFwd: f32 : 2, pdfRev: f32: 3, pos: vec3 : 4, normal: vec3 : 7, beta: vec3 : 10, wo: vec3 : 13)
-            store_vertex_data(camera_buf, current_buf_pos, 1, -1, correctedFwdPDF, 0.0, current_pos, current_normal, beta, wo);
-
-            // if pt.depth == 1{
-            //     print_f32(pdfFwd);
-            // }
-            
-            // if(pixel == 468613){
-            //     print_string("\n");
-            //     print_i32(pt.depth);
-            //     print_string("\n");
-            //     print_f32(beta.r);
-            //     print_string("\n");
-            //     print_f32(mat_sample.color.r);
-            //     print_string("\n");
-            //     print_f32(pdfFwd);
-            //     print_string("\n");
-            // }
-
             let next_pdf = mat_sample.pdf;
             if next_pdf == 0.0{
                 return(Option[(Ray, RayPayload)]::None)
             }
             let next_contri = color_mul(beta, mat_sample.color); //cos and pdf is already applied
+
+            let prev_vertex     = load_vertex(camera_buf, prev_buf_pos);
+
+            let prev_pos        = prev_vertex.pos;
+            let prev_normal     = prev_vertex.normal;
+
+            let mut correctedRevPDF : f32 = 0.0;
+            let pdfRev = mat.bsdf.pdf(mat_sample.in_dir, wo); //this could be wrong!!!!
+
+            if pt.depth != 1{
+                correctedRevPDF = convertDensity(current_pos, prev_pos, prev_normal, pdfRev);
+            }
+
+            store_vertex_pdfRev(camera_buf, prev_buf_pos, correctedRevPDF);
 
             make_option(
                 make_ray(surf.point, mat_sample.in_dir, offset, flt_max),
