@@ -150,9 +150,11 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
             i -= 1;
         }
 
-        // if(t == 3){
+        // if(sumRi == f32::NAN){
+        //     print_string("\n");
         //     print_string("\n");
         //     print_f32(sumRi);
+        //     print_string("\n");
         //     print_string("\n");
         // }
         
@@ -206,7 +208,6 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
             i -= 1;
         }
 
-
         // print_string("\n");
         // print_f32(sumRi);
         // print_string("\n");
@@ -254,13 +255,22 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
             sumRi += ri;
         }
 
-        for i in range_step(t-3, 1, -1){
-            //this just seems wrong
-            //ri *= camBuf.load_f32(startCamBuff + 16 * i + 3) / camBuf.load_f32(startCamBuff + 16 * i + 2);
-            //This is most likly wrong
-            ri *= load_vertex_pdfRev(camBuf, startCamBuff + 16 * i) / load_vertex_pdfFwd(camBuf, startCamBuff + 16 * i);
+
+        let mut i = t-3;
+        //this could be wrong???
+        while i > 1{
+            ri *= load_vertex_pdfRev(camBuf, startCamBuff + 16 * i) / load_vertex_pdfFwd(camBuf, startCamBuff + 16 * i); //Extra check here
             sumRi += ri;
+            i -= 1;
         }
+
+        // for i in range_step(t-3, 1, -1){
+        //     //this just seems wrong
+        //     //ri *= camBuf.load_f32(startCamBuff + 16 * i + 3) / camBuf.load_f32(startCamBuff + 16 * i + 2);
+        //     //This is most likly wrong
+        //     ri *= load_vertex_pdfRev(camBuf, startCamBuff + 16 * i) / load_vertex_pdfFwd(camBuf, startCamBuff + 16 * i);
+        //     sumRi += ri;
+        // }
 
         ri = 1.0;
         
@@ -271,14 +281,19 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
         let qsMinusPdfRev = pdfConectionGround(qs, pt, qsMinus, mat);
         ri *= qsMinusPdfRev / qsMinus.pdfFwd;
         sumRi += ri;
+        
+        print_string("\n");
+        print_f32(sumRi);
+        print_string("\n");
 
-        let mut i = t-3;
+        i = t-3;
         //this could be wrong???
         while i > -1{
             ri *= load_vertex_pdfRev(lightBuf, startLightBuf + 16 * i) / load_vertex_pdfFwd(lightBuf, startLightBuf + 16 * i); //Extra check here
             sumRi += ri;
             i -= 1;
         }
+        
 
         // for i in range_step(t-3, -1, -1){
         //     //this just seems wrong 
@@ -318,11 +333,11 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
         let light_path_len = load_vertex_valid(buf, light_buf_pos);
 
         let choice = if light_path_len == 0 {1} else {pick_light_id(rnd, light_path_len) + 1};
-        //let s = if light_path_len >= 2 {2} else {0}; //important currently there is no choice here!!!!
-        let s = 0;
+        let s = if light_path_len >= 2 {2} else {0}; //important currently there is no choice here!!!!
+        //let s = 0;
         //let s = 2;
         //let s = 1;
-        let t = pt.depth;
+        let t = pt.depth + 1;
         if s == 1{
             let light_id      = pick_light_id(rnd, num_lights);
             let light         = @lights(light_id);//sollte eventuel wie im normalen pathtracer angepasst werden!!
@@ -372,6 +387,7 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
                     sampled.valid = 1;
                     sampled.pos = light_sample.posdir;
                     sampled.beta = light_beta;
+                    sampled.normal = make_vec3(0.5369, -0.843659, 0.0000); //this is only temporary and is should be fixed
                     let mut pt = make_empty_Vertex();
                     //this should be enuqgh but im not quit shoure 
                     pt.valid = 1;
@@ -381,12 +397,16 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
                     //i hope we dont need the normal!!!!
 
                     let mis = MISWeightS1(camera_buf, buf, pixel, t, light_sample, mat, sampled);
+
                     // print_string("\n");
                     // print_f32(mis);
                     // print_string("\n");
+
+                    let mis_contri = color_mulf(contri, mis);
+
                     return(make_simple_shadow_ray(
                         make_ray(surf.point, light_dir, offset, 1 - offset),
-                        contri
+                        mis_contri
                     ))
                 }else{
                     return(ShadowRay::None)
@@ -437,6 +457,12 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
                 let light_bsdf = light_mat.eval(light_wo, light_wi); 
                 let conection = color_mulf(color_mul(camera_bsdf, light_bsdf), geom_factor);
                 let contri = color_mul(color_mul(conection, camera_beta), light_beta);
+
+                let mis = MISWeight(camera_buf, buf, pixel, s, t, mat);
+
+                // print_string("\n");
+                // print_f32(mis);
+                // print_string("\n");
             
                 // if(pixel == 125864){
                 //     print_string("Camera");
@@ -566,7 +592,8 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
                 let mis = MISWeightS0(camera_buf, buf, pixel, t, pdf_lightpick, current_light); //the pt.depth thing is motlikly wrong
 
                 
-                // if mis < 0.000001{
+                // if mis != 1.0 && pixel == 457256{
+                // //if mis < -0.0{
                 //     print_string("\n");
                 //     print_i32(pt.depth);
                 //     print_string("\n");
@@ -574,7 +601,6 @@ fn @make_path_renderer(max_path_len: i32, num_lights: i32, lights: LightTable, a
                 //     print_string("\n");
                 // }
                 return(make_option(color_mulf(contrib,mis)))
-                //return(make_option(contrib))
                 //return(Option[Color]::None)
                 // if pt.depth == 1{
                 //     return(make_option(contrib))
