@@ -15,7 +15,7 @@
 	},
 	"bsdfs": [
 		{"type":"diffuse", "name": "mat-Light", "reflectance":[0.0,0.0,0.0]},
-		{"type":"diffuse", "name": "mat-GrayWall", "reflectance":[1.0,1.0,1.0]}
+		{"type":"diffuse", "name": "mat-GrayWall", "reflectance":[0.8,0.8,0.8]}
 	],
 	"shapes": [
 		{"type":"rectangle", "name":"AreaLight", "flip_normals":true, "transform": [0, 0.084366, -0.053688, -0.7, 0, 0.053688, 0.084366, 0.1, 0.1, 0, 0, 0, 0, 0, 0, 1]},
@@ -33,6 +33,9 @@
 		{"name":"Left","shape":"Left", "bsdf":"mat-GrayWall"},
 		{"name":"Right","shape":"Right", "bsdf":"mat-GrayWall"},
 		{"name":"Back","shape":"Back", "bsdf":"mat-GrayWall"},
+		{"name":"Diamond1","shape":"Diamond", "bsdf":"mat-GrayWall"},
+		{"name":"Diamond2","shape":"Diamond", "bsdf":"mat-GrayWall", "transform":{"translate":[0.6,0,0]}},
+		{"name":"Diamond3","shape":"Diamond", "bsdf":"mat-GrayWall", "transform":{"translate":[-0.6,0,0]}}
 	],
 	"lights": [
 		{"type":"area", "name":"AreaLight", "entity":"AreaLight", "radiance":[100,100,100]}

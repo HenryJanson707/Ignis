@@ -65,16 +65,6 @@ fn @make_light_renderer(buf: DeviceBuffer, max_path_len_light: i32) -> Technique
 
             //The current size of one data point is 16 bytes (valid: i32 (0, 1): 0, material: i32: 1, pdfFwd: f32 : 2, pdfRev: f32: 3, pos: vec3 : 4, normal: vec3 : 7, beta: vec3 : 10, wo: vec3 : 13)
             store_vertex_data(buf, current_buf_pos, 1, -1, correctedFwdPDF, 0.0, current_pos, current_normal, beta, wo);
-            
-            // if(pixel == 234551 && pt.depth < 3){
-            //     print_string("Light_Bounce");
-            //     print_string("\n");
-            //     print_f32(surf.face_normal.x);print_string(", ");print_f32(surf.face_normal.y);print_string(", ");print_f32(surf.face_normal.z);
-            //     print_string("\n");
-            //     print_f32(surf.local.col(2).x);print_string(", ");print_f32(surf.local.col(2).y);print_string(", ");print_f32(surf.local.col(2).z);
-            //     print_string("\n");
-            //     print_flush();
-            // }
 
             let next_pdf = mat_sample.pdf;
             if next_pdf == 0.0{ //TODO better use Epsilon?
