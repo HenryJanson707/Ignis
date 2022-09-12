@@ -105,7 +105,7 @@ struct Device {
 
     // Special structure to allow print functions within devices. Should only be used for debug purposes
     request_debug_output: fn () -> DebugOutput,
-    get_film_size:  fn () -> (i32, i32)
+    get_film_size:  fn () -> (i32, i32),
 
     //------------------------------------- Local registry
     get_local_parameter_i32:   fn (&[u8] /* name */, i32 /* default */)   -> i32,

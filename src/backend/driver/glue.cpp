@@ -1479,7 +1479,7 @@ void* glue_compileSource(const char* src, const char* function, bool isVerbose)
 #ifdef IG_DEBUG
     anydsl_set_log_level(isVerbose ? 1 /* info */ : 4 /* error */);
 #else
-    anydsl_set_log_level(isVerbose ? 3 /* warn */ : 4 /* error */);
+    //anydsl_set_log_level(isVerbose ? 3 /* warn */ : 4 /* error */);
 #endif
 
     size_t len = std::strlen(src);

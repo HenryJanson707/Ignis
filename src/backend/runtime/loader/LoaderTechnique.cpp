@@ -1,7 +1,6 @@
 #include "LoaderTechnique.h"
 #include "Loader.h"
 #include "LoaderLight.h"
-#include "ShaderUtils.h"
 #include "ShadingTree.h"
 #include "LoaderUtils.h"
 #include "Logger.h"
@@ -41,7 +40,7 @@ static TechniqueInfo bi_get_info(const std::string&, const std::shared_ptr<Parse
     //info.OverrideCameraGenerator.push_back("light"); //TODO Check if this works???
 }
 
-static void bi_body_loader(std::ostream& stream, const std::string&, const std::shared_ptr<Parser::Object>&, const LoaderContext&)
+static void bi_body_loader(std::ostream& stream, const std::string&, const std::shared_ptr<Parser::Object>&, LoaderContext&)
 {
     stream << "  let (film_width, film_height) = device.get_film_size();" << std::endl;
     stream << "  let max_depth_light = 5;" << std::endl;
@@ -241,8 +240,10 @@ static TechniqueInfo path_get_info(const std::string&, const std::shared_ptr<Par
         stream << ShaderUtils::generateDatabase() << std::endl;
 
         ShadingTree tree(ctx);
+        LoaderLight loaderLight;
+        loaderLight.setup(ctx);
 
-        stream << LoaderLight::generate(tree, false) << std::endl;
+        stream << loaderLight.generate(tree, false) << std::endl;
         stream << "  let (film_width, film_height) = device.get_film_size();" << std::endl;
         stream << "  let spp = " << ctx.SamplesPerIteration << " : i32;" << std::endl;
         //The Buffer Size is far too big!!
@@ -319,7 +320,7 @@ static void path_body_loader(std::ostream& stream, const std::string&, const std
     }else{
         stream << "  let technique = make_light_renderer(buf, max_depth_light);" << std::endl;
     }
-    
+
     ShadingTree tree(ctx);
     stream << ctx.Lights->generateLightSelector(ls, tree);
 

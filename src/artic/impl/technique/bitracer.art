@@ -12,15 +12,15 @@ fn @convertDensity(current_pos: Vec3, next_pos: Vec3, next_normal: Vec3, pdf: f3
 fn @make_light_renderer(buf: DeviceBuffer, max_path_len_light: i32) -> Technique  {
     let offset:f32 = 0.001;
 
-    fn @on_bounce( ray: Ray
-                 , pixel: i32
-                 , _hit: Hit
-                 , rnd: &mut RndState
-                 , payload: RayPayload
-                 , surf: SurfaceElement
-                 , mat: Material
+    fn @on_bounce( ctx: ShadingContext
+                , rnd: &mut RndState
+                , payload: RayPayload
+                , mat: Material
                  ) -> Option[(Ray, RayPayload)] {
         let pt = unwrap_ptraypayload(payload);
+        let ray = ctx.ray;
+        let surf = ctx.surf;
+        let pixel = ctx.pixel;
         
         //TODO is that at the right position or should it be further down?
         if pt.depth >= max_path_len_light {
@@ -73,7 +73,7 @@ fn @make_light_renderer(buf: DeviceBuffer, max_path_len_light: i32) -> Technique
             let next_contri = color_mul(beta, mat_sample.color); //cos and pdf is already applied
 
             make_option(
-                make_ray(surf.point, mat_sample.in_dir, offset, flt_max),
+                make_ray(surf.point, mat_sample.in_dir, offset, flt_max, ray_flag_bounce),
                 wrap_ptraypayload(PTRayPayload {
                     mis = next_pdf,
                     contrib = next_contri,
@@ -87,12 +87,12 @@ fn @make_light_renderer(buf: DeviceBuffer, max_path_len_light: i32) -> Technique
     }
 
     Technique {
-        on_hit    = @ |_, _, _, _, _, _| Option[(Color)]::None,
+        on_hit    = @ |_, _, _| Option[(Color)]::None,
         on_miss   = @ |_, _, _| Option[(Color)]::None,
-        on_shadow = @ |_, _, _, _, _, _, _| ShadowRay::None,
+        on_shadow = @ |_, _, _, _| ShadowRay::None,
         on_bounce      = on_bounce,
-        on_shadow_hit  = @ |_, _, _| Option[(Color)]::None,
-        on_shadow_miss = @ |_, _, _| Option[(Color)]::None,
+        on_shadow_hit  = @ |_, _, _, _| Option[(Color)]::None,
+        on_shadow_miss = @ |_, _, _,_| Option[(Color)]::None,
     }
 }
 

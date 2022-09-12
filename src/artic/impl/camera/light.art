@@ -1,6 +1,4 @@
-fn @make_light_camera(tmin: f32, tmax: f32, buf: DeviceBuffer, num_lights: i32, lights: LightTable, max_path_len: i32){
-    let pdf_pick = 1 / (num_lights as f32);
-
+fn @make_light_camera(tmin: f32, tmax: f32, buf: DeviceBuffer, light_selector: LightSelector, max_path_len: i32){
     Camera {
         differential = @ |_| {//TODO this is wrong!!!!
             (
@@ -9,16 +7,15 @@ fn @make_light_camera(tmin: f32, tmax: f32, buf: DeviceBuffer, num_lights: i32, 
             )
         },
         generate_ray = @ |rnd, _, _, pixel| {
-            let light_id        = pick_light_id(rnd, num_lights);
-            let light           = @lights(light_id);
+            let (light, light_select_pdf) = light_selector.sample(rnd, make_vec3(0,0,0)); //we have no position here
             let sample_emission = light.sample_emission;
             let light_sample    = @sample_emission(rnd);
 
-            let pdfFwd          = light_sample.pdf_area * pdf_pick; 
+            let pdfFwd          = light_sample.pdf_area * light_select_pdf; 
             let pdfFwd2         = light_sample.pdf_dir;
             let cos_light       = light_sample.cos;
             let pdfRev : f32    = 0.0;
-            let pdf             = cos_light / (light_sample.pdf_area * light_sample.pdf_dir * pdf_pick);
+            let pdf             = cos_light / (light_sample.pdf_area * light_sample.pdf_dir * light_select_pdf);
             let pos             = light_sample.pos;
             let intensity       = light_sample.intensity;
             let beta            = color_mulf(intensity, pdf);
@@ -46,7 +43,7 @@ fn @make_light_camera(tmin: f32, tmax: f32, buf: DeviceBuffer, num_lights: i32, 
             
             store_vertex_pdfFwd(buf, next_pos, pdfFwd2);
             store_vertex_Beta(buf, next_pos, beta);
-            make_ray(pos, dir, tmin, tmax)
+            make_ray(pos, dir, tmin, tmax, ray_flag_camera)
         }
     }
 }
