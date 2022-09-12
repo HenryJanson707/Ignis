@@ -13,6 +13,12 @@ fn ig_render(_settings: &Settings) -> () {
     ignis_cpu_get_primary_stream(&mut primary, 0);
     ignis_cpu_get_secondary_stream(&mut secondary, 0);
 
+    let mut temp : TemporaryStorageHost;
+    ignis_get_temporary_storage(0, &mut temp);
+
+    let mut work_info : WorkInfo;
+    ignis_get_work_info(&mut work_info);
+
     // Force the export of BVH types
     let mut node2 : &[Node2];
     let mut node4 : &[Node4];
@@ -22,16 +28,6 @@ fn ig_render(_settings: &Settings) -> () {
     ignis_load_bvh2_ent(0, &mut node2, &mut entityleaf);
     ignis_load_bvh4_ent(0, &mut node4, &mut entityleaf);
     ignis_load_bvh8_ent(0, &mut node8, &mut entityleaf);
-
-    // Force the export of the CDF types
-    /*let mut cdf1 : CDF1D;
-    let mut cdf2 : CDF2D;
-    ignis_load_cdf1d(0, "", &mut cdf1);
-    ignis_load_cdf2d(0, "", &mut cdf2);
-
-    // Force the export of the klems model
-    let mut klems : KlemsModel;
-    ignis_load_klems(0, "", &mut klems);*/
 
     // Force the export
     let mut dtb : SceneDatabase;
@@ -54,11 +50,11 @@ fn ig_miss_shader(_settings: &Settings, _first: i32, _last: i32) -> () {
 }
 
 #[export]
-fn ig_hit_shader(_settings: &Settings, _entity_id: i32, _first: i32, _last: i32) -> () {
+fn ig_hit_shader(_settings: &Settings, _entity_id: i32, _mat_id: i32, _first: i32, _last: i32) -> () {
 }
 
 #[export]
-fn ig_advanced_shadow_shader(_settings: &Settings, _first: i32, _last: i32) -> () {
+fn ig_advanced_shadow_shader(_settings: &Settings, _mat_id: i32, _first: i32, _last: i32) -> () {
     // If is hit or miss is hardcoded
 }
 

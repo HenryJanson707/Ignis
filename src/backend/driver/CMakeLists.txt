@@ -48,6 +48,8 @@ cmake_dependent_option(IG_WITH_DEVICE_CPU_AVX512         "Force AVX 512 driver" 
 cmake_dependent_option(IG_WITH_DEVICE_CPU_BEST           "Select the best instruction set"     ON   "IG_WITH_DEVICE_CPU_SIMD" OFF)
 cmake_dependent_option(IG_WITH_DEVICE_CPU_GENERIC_ALWAYS "Always build the generic CPU driver" OFF  "IG_WITH_DEVICE_CPU"      OFF)
 
+cmake_dependent_option(IG_WITH_DEVICE_CPU_ST_GENERIC "Enable the single threaded generic CPU driver. This is only useful for debug purposes" OFF  "IG_WITH_DEVICE_CPU" OFF)
+
 set(DEVICE_SELECTION )
 
 if(IG_WITH_DEVICE_CPU)
@@ -118,6 +120,10 @@ if(IG_WITH_DEVICE_CPU)
     if(IG_WITH_DEVICE_CPU_GENERIC_ALWAYS AND IG_WITH_DEVICE_CPU_SIMD)
         list(APPEND DEVICE_SELECTION "DEFAULT")
     endif()
+
+    if(IG_WITH_DEVICE_CPU_ST_GENERIC)
+        list(APPEND DEVICE_SELECTION "SINGLE")
+    endif()
 endif()
 
 if(IG_WITH_DEVICE_GPU)
@@ -187,6 +193,11 @@ endif()
 ###########################################################
 option(IG_BUILD_DRIVER_PARALLEL "Build driver files in parallel. Not recommended" OFF)
 
+set(_driver_cpp_src glue.cpp ShallowArray.h)
+if(TARGET OpenImageDenoise::OpenImageDenoise)
+    set(_driver_cpp_src ${_driver_cpp_src} oidn.cpp)
+endif()
+
 set(_targets )
 foreach(var ${VARIANTS})
     var_to_name(var_name ${var})
@@ -214,16 +225,22 @@ foreach(var ${VARIANTS})
 
     # Construct shared library for runtime loading
     set(_target_name ig_driver_${var_name})
-    add_library(${_target_name} MODULE ${_objs} glue.cpp ShallowArray.h)
+    add_library(${_target_name} MODULE ${_objs} ${_driver_cpp_src})
     set_target_properties(${_target_name} PROPERTIES PREFIX "")
     target_compile_definitions(${_target_name} PRIVATE ${args})
     target_link_libraries(${_target_name} PRIVATE ${AnyDSL_runtime_LIBRARIES} ${AnyDSL_runtime_ARTIC_JIT_LIBRARIES} ig_lib_runtime TBB::tbb)
+    
+    if(TARGET OpenImageDenoise::OpenImageDenoise)
+        target_link_libraries(${_target_name} PRIVATE OpenImageDenoise::OpenImageDenoise)
+        target_compile_definitions(${_target_name} PRIVATE "IG_HAS_DENOISER")
+    endif()
+
     target_include_directories(${_target_name} PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>)
     target_include_directories(${_target_name} PRIVATE ${AnyDSL_runtime_INCLUDE_DIRS})
     add_dependencies(${_target_name} artic_c_interface)
     add_lto(${_target_name})
     add_checks(${_target_name})
-    install(TARGETS ${_target_name} COMPONENT runtime LIBRARY DESTINATION lib/)
+    install(TARGETS ${_target_name} ${_IG_RUNTIME_SET} COMPONENT runtime LIBRARY DESTINATION lib/)
 
     # Some of the compilation process requires a lot of memory.
     # Prevent parallel build of the drivers (per default) by chaining them together

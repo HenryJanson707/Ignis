@@ -1,34 +1,21 @@
 #pragma once
 
 #include "LoaderEnvironment.h"
+#include "RuntimeSettings.h"
 #include "Target.h"
 #include "TechniqueInfo.h"
 
+#include <any>
 #include <filesystem>
-#include <variant>
 
 namespace IG {
 
 struct SceneDatabase;
 
-using TextureColorVariant = std::variant<uint32, Vector3f>;
-inline bool isTexture(const TextureColorVariant& var)
-{
-    return std::holds_alternative<uint32>(var);
-}
-
-inline uint32 extractTexture(const TextureColorVariant& var)
-{
-    return std::get<uint32>(var);
-}
-
-inline Vector3f extractColor(const TextureColorVariant& var)
-{
-    return std::get<Vector3f>(var);
-}
-
 struct LoaderContext {
     Parser::Scene Scene;
+
+    std::unique_ptr<class LoaderLight> Lights;
 
     std::filesystem::path FilePath;
     IG::Target Target;
@@ -38,15 +25,23 @@ struct LoaderContext {
 
     std::string CameraType;
     std::string TechniqueType;
+    std::string PixelSamplerType;
     IG::TechniqueInfo TechniqueInfo;
 
+    DenoiserSettings Denoiser;
     bool IsTracer = false;
 
     size_t CurrentTechniqueVariant;
     inline const IG::TechniqueVariantInfo CurrentTechniqueVariantInfo() const { return TechniqueInfo.Variants[CurrentTechniqueVariant]; }
 
-    std::unordered_map<std::string, uint32> TextureBuffer; // Texture to Buffer/Image, used only in workaround
-    std::vector<Vector3f> TextureAverages;                 // Workaround for now
+    bool ForceShadingTreeSpecialization = false;
+    ParameterSet LocalRegistry; // Current local registry for given shader
+    inline void resetRegistry()
+    {
+        LocalRegistry = ParameterSet();
+    }
+
+    std::unordered_map<std::string, std::any> ExportedData; // Cache with already exported data and auxillary info
 
     LoaderEnvironment Environment;
     SceneDatabase* Database = nullptr;
@@ -59,8 +54,27 @@ struct LoaderContext {
 
     std::filesystem::path handlePath(const std::filesystem::path& path, const Parser::Object& obj) const;
 
-    Vector3f extractColor(const Parser::Object& obj, const std::string& propname, const Vector3f& def = Vector3f::Ones()) const;
-    float extractIOR(const Parser::Object& obj, const std::string& propname, float def = 1.55f) const;
+    std::unordered_map<std::string, size_t> RegisteredResources;
+    inline size_t registerExternalResource(const std::filesystem::path& path)
+    {
+        // TODO: Ensure canonical paths?
+        auto it = RegisteredResources.find(path.generic_u8string());
+        if (it != RegisteredResources.end())
+            return it->second;
+        const size_t id = RegisteredResources.size();
+
+        return RegisteredResources[path.generic_u8string()] = id;
+    }
+
+    inline std::vector<std::string> generateResourceMap() const
+    {
+        std::vector<std::string> map(RegisteredResources.size());
+        for (const auto& p : RegisteredResources) {
+            IG_ASSERT(p.second < map.size(), "Access should be always in bound");
+            map[p.second] = p.first;
+        }
+        return map;
+    }
 
     bool HasError = false;
 

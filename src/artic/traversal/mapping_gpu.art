@@ -55,7 +55,7 @@ fn @make_gpu_prim(j: i32, tris: &[Tri1], is_nvvm: bool) -> Prim {
             let e2  = make_vec3(tri2(0), tri2(1), tri2(2));
             let n   = vec3_cross(e1, e2);
             let tri = make_tri(v0, e1, e2, n);
-            if let Option[(f32, f32, f32)]::Some((t, u, v)) = intersect_ray_tri(false /*backface_culling*/, ray, tri) {
+            if let Option[(f32, f32, f32)]::Some((t, u, v)) = intersect_ray_tri_gpu(false /*backface_culling*/, ray, tri) {
                 make_option(make_hit(-1/* Will be set later*/, prim_id & 0x7FFFFFFF, t, make_vec2(u, v)))
             } else {
                 Option[Hit]::None
@@ -72,12 +72,14 @@ fn @make_gpu_ent(j: i32, objs: &[EntityLeaf1], is_nvvm: bool) -> EntityLeaf {
     let e0 = d.load_vec4(0);
     let e1 = d.load_vec4(4);
     let m  = d.load_mat3x4(8);
+    let e2 = d.load_vec4(20);
     make_entity_leaf(
         make_bbox(make_vec3(e0.x, e0.y, e0.z),
                   make_vec3(e1.x, e1.y, e1.z)),
         bitcast[i32](e0.w),
         bitcast[i32](e1.w),
-        m
+        m,
+        bitcast[u32](e2.x)
     )
 }
 
@@ -277,19 +279,21 @@ fn @gpu_traverse_single_helper( min_max: MinMax
             while true {
                 let leaf = bvh.ent(ref_id++);
 
-                if let Option[(f32,f32)]::Some((tmin, _tmax)) = intersect_ray_box_single_section(min_max, false, ray, leaf.bbox) {
-                    if tmin <= hit.distance {
-                        let local_ray = transform_ray(ray, leaf.local);
-                        let shape_bvh = @prim_bvhs(leaf.shape_id);
-                        let local_hit = gpu_traverse_single_helper_prim(min_max, local_ray, shape_bvh, any_hit, 1);
+                if check_ray_visibility(ray, leaf.flags) {
+                    if let Option[(f32,f32)]::Some((tmin, _tmax)) = intersect_ray_box_single_section(min_max, false, ray, leaf.bbox) {
+                        if tmin <= hit.distance {
+                            let local_ray = transform_ray(ray, leaf.local);
+                            let shape_bvh = @prim_bvhs(leaf.shape_id);
+                            let local_hit = gpu_traverse_single_helper_prim(min_max, local_ray, shape_bvh, any_hit, 1);
 
-                        if local_hit.prim_id != -1 {
-                            if local_hit.distance <= hit.distance {
-                                hit      = make_hit(leaf.entity_id & 0x7FFFFFFF, local_hit.prim_id, local_hit.distance, local_hit.prim_coords);
-                                ray.tmax = hit.distance;
+                            if local_hit.prim_id != -1 {
+                                if local_hit.distance <= hit.distance {
+                                    hit      = make_hit(leaf.entity_id & 0x7FFFFFFF, local_hit.prim_id, local_hit.distance, local_hit.prim_coords);
+                                    ray.tmax = hit.distance;
 
-                                // Early exit mode
-                                if any_hit { return(hit) }
+                                    // Early exit mode
+                                    if any_hit { return(hit) }
+                                }
                             }
                         }
                     }
@@ -304,7 +308,6 @@ fn @gpu_traverse_single_helper( min_max: MinMax
 }
 
 // Wrapper  ------------------------------------------------------------------------
-
 fn @gpu_traverse_single( acc: Accelerator
                        , min_max: MinMax
                        , scene: SceneGeometry

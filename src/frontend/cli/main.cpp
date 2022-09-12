@@ -19,6 +19,9 @@ struct SectionTimer {
 
 static std::string beautiful_time(uint64 ms)
 {
+    if (ms == 0)
+        return "0ms";
+
     uint64_t pms = ms % 1000;
     ms /= 1000;
     uint64_t ps = ms % 60;
@@ -121,7 +124,7 @@ int main(int argc, char** argv)
         auto ticks = std::chrono::high_resolution_clock::now();
 
         timer_render.start();
-        runtime->step();
+        runtime->step(samples_sec.size() != desired_iter-1);
         timer_render.stop();
 
         auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - ticks).count();
@@ -136,7 +139,7 @@ int main(int argc, char** argv)
 
     SectionTimer timer_saving;
     timer_saving.start();
-    if (!saveImageOutput(cmd.Output, *runtime))
+    if (!saveImageOutput(cmd.Output, *runtime, nullptr))
         IG_LOG(L_ERROR) << "Failed to save EXR file " << cmd.Output << std::endl;
     else
         IG_LOG(L_INFO) << "Result saved to " << cmd.Output << std::endl;

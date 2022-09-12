@@ -1,5 +1,5 @@
-# Ignis ![Build](https://img.shields.io/github/workflow/status/PearCoding/Ignis/Docker%20AVX2) [![Docker Pulls](https://img.shields.io/docker/pulls/pearcoding/ignis)](https://hub.docker.com/repository/docker/pearcoding/ignis)
-'Ignis' is a raytracer for the RENEGADE project implemented using the Artic frontend of the AnyDSL compiler framework (https://anydsl.github.io/) and based on Rodent (https://github.com/AnyDSL/rodent). The renderer is usable on all three major platforms (Linux, Windows, MacOs).
+# Ignis
+'Ignis' is a high-performance raytracer implemented using the Artic frontend of the AnyDSL compiler framework (https://anydsl.github.io/) and based on Rodent (https://github.com/AnyDSL/rodent). The renderer is usable on all three major platforms (Linux, Windows, MacOs).
 
 ![A scene containing diamonds rendered by Ignis with photonmapping](docs/screenshot.jpeg)
 
@@ -30,6 +30,7 @@ A sample scene from https://github.com/KhronosGroup/glTF-Sample-Models directly 
 The following dependencies will be downloaded and compiled automatically.
 Have a look at [CPM](https://github.com/cpm-cmake/CPM.cmake) for more information. 
 
+ - Catch2 <https://github.com/catchorg/Catch2>
  - imgui <https://github.com/ocornut/imgui>
  - imgui-markdown <https://github.com/juliettef/imgui_markdown>
  - PExpr <https://github.com/PearCoding/PExpr>
@@ -79,7 +80,7 @@ Currently, four frontends are available:
  - `igtrace` This commandline only frontend ignores camera specific information and expects a list of rays from the user. It returns the contribution back to the user for each ray initially specified.
  - `Python API` This simple python API allows to communicate with the runtime and allows you to work with the raytracer in interactive notebooks and more. The API is only available if Python3 was found in the system. You might disable the API by setting the CMake option `IG_WITH_PYTHON_API` to Off.
 
-Use the `--help` argument on each of the executables to get information of possible arguments for each frontend. Also have a look at the Wiki(TODO) and Website(TODO) for more in-depth information.
+Use the `--help` argument on each of the executables to get information of possible arguments for each frontend.
 
 ## Running
 
@@ -111,7 +112,7 @@ You can also use `rad2json` to convert geometry used in the Radiance framework t
 
 Ignis is able to understand glTF files. You can embed glTF files in Ignis's own scene description file or directly use the glTF file as an input to the multiple frontends.
 
-A Blender plugin is planned for the future.
+A Blender plugin is available in `scripts/blender_exporter/`.
 
 ## Tiny tools
 
@@ -147,3 +148,14 @@ The Ignis client has an optional UI and multiple ways to interact with the scene
  - `Numpad 9` to look behind you.
  - `Numpad 2468` to rotate the camera.
  - Use with `Strg/Ctrl` to rotate the camera around the center of the scene. Use with `Alt` to enable first person camera behaviour. 
+
+## Funding and Cooperation
+
+The project is funded by the [Velux Stiftung](https://veluxstiftung.ch) and developed in cooperation with the [Computer Graphics](https://graphics.cg.uni-saarland.de/) chair of the [Saarland University](https://www.uni-saarland.de/en/home.html), [Fraunhofer Institute for Solar Energy Systems ISE](https://www.ise.fraunhofer.de/en.html) and [DFKI](https://www.dfki.de/en/web).
+
+<a href="https://veluxstiftung.ch">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/funding/PNG_VeluxStiftung_Logo_negative.png">
+  <img alt="Velux Stiftung Logo" src="docs/funding/PNG_VeluxStiftung_Logo_positive.png" width="33%">
+</picture>
+</a>

@@ -114,18 +114,8 @@ fn @mat4x4_matmul(a: Mat4x4, b: Mat4x4) = make_mat4x4(
     mat4x4_mul(a, b.col(2)),
     mat4x4_mul(a, b.col(3)));
 
-fn @mat3x3_at(a: Mat3x3, row: i32, col: i32) = match(row) {
-    0 => a.col(col).x,
-    1 => a.col(col).y,
-    _ => a.col(col).z
-};
-
-fn @mat4x4_at(a: Mat4x4, row: i32, col: i32) = match(row) {
-    0 => a.col(col).x,
-    1 => a.col(col).y,
-    2 => a.col(col).z,
-    _ => a.col(col).w
-};
+fn @mat3x3_at(a: Mat3x3, row: i32, col: i32) = vec3_at(a.col(col), row);
+fn @mat4x4_at(a: Mat4x4, row: i32, col: i32) = vec4_at(a.col(col), row);
 
 fn @mat3x3_normalize_cols(a : Mat3x3) = make_mat3x3(vec3_normalize(a.col(0)), vec3_normalize(a.col(1)), vec3_normalize(a.col(2)));
 
@@ -242,4 +232,30 @@ fn @mat4x4_transform_point(a: Mat4x4, v: Vec3) -> Vec3 {
 fn @mat4x4_transform_direction(a: Mat4x4, v: Vec3) -> Vec3 {
     let res = mat4x4_mul(a, make_vec4(v.x, v.y, v.z, 0));
     make_vec3(res.x, res.y, res.z)
+}
+
+/// Construct an orthogonal matrix M such that b = M*a for a given a and b
+fn @mat3x3_align_vectors(a: Vec3, b: Vec3) -> Mat3x3 {
+    let axis = vec3_cross(b, a);
+    let cosA = vec3_dot(a, b);
+    if cosA <= -1 {
+        return(make_mat3x3(
+                make_vec3(-1,  0,  0),
+                make_vec3( 0, -1,  0),
+                make_vec3( 0,  0, -1)
+            ))
+    }
+    let k = 1 / (1 + cosA);
+
+    make_mat3x3(
+        make_vec3((axis.x * axis.x * k) + cosA,
+                  (axis.y * axis.x * k) - axis.z, 
+                  (axis.z * axis.x * k) + axis.y),
+        make_vec3((axis.x * axis.y * k) + axis.z,  
+                  (axis.y * axis.y * k) + cosA,      
+                  (axis.z * axis.y * k) - axis.x),
+        make_vec3((axis.x * axis.z * k) - axis.y,  
+                  (axis.y * axis.z * k) + axis.x,  
+                  (axis.z * axis.z * k) + cosA) 
+                 )
 }

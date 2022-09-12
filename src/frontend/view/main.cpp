@@ -19,6 +19,9 @@ struct SectionTimer {
 
 static std::string beautiful_time(uint64 ms)
 {
+    if (ms == 0)
+        return "0ms";
+
     uint64_t pms = ms % 1000;
     ms /= 1000;
     uint64_t ps = ms % 60;
@@ -109,7 +112,7 @@ int main(int argc, char** argv)
         // Setup initial travelspeed
         BoundingBox bbox = runtime->sceneBoundingBox();
         bbox.extend(camera.Eye);
-        ui->setTravelSpeed(bbox.diameter().maxCoeff() / 50);
+        ui->setTravelSpeed(std::max(1e-4f, bbox.diameter().maxCoeff() / 50));
     } catch (...) {
         return EXIT_FAILURE;
     }
@@ -214,7 +217,11 @@ int main(int argc, char** argv)
     SectionTimer timer_saving;
     timer_saving.start();
     if (!cmd.Output.empty()) {
-        if (!saveImageOutput(cmd.Output, *runtime))
+        CameraOrientation orientation;
+        orientation.Eye = camera.Eye;
+        orientation.Up  = camera.Up;
+        orientation.Dir = camera.Direction;
+        if (!saveImageOutput(cmd.Output, *runtime, &orientation))
             IG_LOG(L_ERROR) << "Failed to save EXR file " << cmd.Output << std::endl;
         else
             IG_LOG(L_INFO) << "Result saved to " << cmd.Output << std::endl;

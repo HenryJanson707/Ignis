@@ -6,7 +6,7 @@
 
 namespace IG {
 static const std::map<std::string, LogLevel> LogLevelMap{ { "fatal", L_FATAL }, { "error", L_ERROR }, { "warning", L_WARNING }, { "info", L_INFO }, { "debug", L_DEBUG } };
-static const std::map<std::string, Target> TargetMap{ { "generic", Target::GENERIC }, { "asimd", Target::ASIMD }, { "sse42", Target::SSE42 }, { "avx", Target::AVX }, { "avx2", Target::AVX2 }, { "avx512", Target::AVX512 }, { "amdgpu", Target::AMDGPU }, { "nvvm", Target::NVVM } };
+static const std::map<std::string, Target> TargetMap{ { "generic", Target::GENERIC }, { "single", Target::SINGLE }, { "asimd", Target::ASIMD }, { "sse42", Target::SSE42 }, { "avx", Target::AVX }, { "avx2", Target::AVX2 }, { "avx512", Target::AVX512 }, { "amdgpu", Target::AMDGPU }, { "nvvm", Target::NVVM } };
 static const std::map<std::string, SPPMode> SPPModeMap{ { "fixed", SPPMode::Fixed }, { "capped", SPPMode::Capped }, { "continous", SPPMode::Continous } };
 
 class MyTransformer : public CLI::Validator {
@@ -135,6 +135,23 @@ ProgramOptions::ProgramOptions(int argc, char** argv, ApplicationType type, cons
     app.add_option("--script-dir", ScriptDir, "Override internal script standard library by '.art' files from the given directory");
 
     app.add_flag("--add-env-light", AddExtraEnvLight, "Add additional constant environment light. This is automatically done for glTF scenes without any lights");
+    app.add_flag("--force-specialization", ForceSpecialization, "Enforce specialization for parameters in shading tree. This will increase compile time drastically for potential runtime optimization");
+
+    if (type != ApplicationType::Trace) {
+        if (type == ApplicationType::CLI) {
+            // Focus on quality
+            DenoiserFollowSpecular     = true;
+            DenoiserOnlyFirstIteration = false;
+        } else {
+            // Focus on interactivity
+            DenoiserFollowSpecular     = false;
+            DenoiserOnlyFirstIteration = true;
+        }
+
+        app.add_flag("--denoise", Denoise, "Apply denoiser if available");
+        app.add_flag("--denoiser-follow-specular,!--denoiser-skip-specular", DenoiserFollowSpecular, "Follow specular paths or terminate at them");
+        app.add_flag("--denoiser-aov-first-iteration,!--denoiser-aov-every-iteration", DenoiserOnlyFirstIteration, "Acquire scene normal, albedo and depth information every iteration or only at the first");
+    }
 
     if (type == ApplicationType::Trace) {
         app.add_option("-i,--input", InputRay, "Read list of rays from file instead of the standard input");
@@ -174,7 +191,12 @@ void ProgramOptions::populate(RuntimeOptions& options) const
     if (Width.has_value() && Height.has_value())
         options.OverrideFilmSize = { Width.value(), Height.value() };
 
-    options.AddExtraEnvLight = AddExtraEnvLight;
+    options.AddExtraEnvLight    = AddExtraEnvLight;
+    options.ForceSpecialization = ForceSpecialization;
+
+    options.Denoiser.Enabled            = Denoise;
+    options.Denoiser.FollowSpecular     = DenoiserFollowSpecular;
+    options.Denoiser.OnlyFirstIteration = DenoiserOnlyFirstIteration;
 
     options.ScriptDir = ScriptDir;
 }

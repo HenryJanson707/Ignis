@@ -88,12 +88,16 @@ Smooth dielectric (:monosp:`dielectric`)
    - TODO
  * - ext_ior, int_ior
    - |number|
-   - 1.00027, 1.55
-   - TODO
+   - vacuum, bk7
+   - Specifies exterior and interior index of refraction.
+ * - ext_ior_material, int_ior_material
+   - |string|
+   - *None*, *None*
+   - Has to be one of the available presets listed :ref:`here <bsdf-dielectric-list>`.
  * - thin
    - |bool|
    - false
-   - Thin
+   - True if the glass should be treated as a thin interface. :monosp:`int_ior` will be always the inside of the thin surface, regardless of the direction of the surface normal.
 
 
 .. subfigstart::
@@ -131,8 +135,12 @@ Rough dielectric (:monosp:`roughdielectric`)
    - TODO
  * - ext_ior, int_ior
    - |number|
-   - 1.00027, 1.55
-   - TODO
+   - vacuum, bk7   
+   - Specifies exterior and interior index of refraction.
+ * - ext_ior_material, int_ior_material
+   - |string|
+   - *None*, *None*
+   - Has to be one of the available presets listed :ref:`here <bsdf-dielectric-list>`.
  * - alpha_u, alpha_v
    - |number|
    - 0.1, 0.1
@@ -183,8 +191,12 @@ Smooth conductor (:monosp:`conductor`)
 
  * - eta, k
    - |color|
-   - ~ Gold
+   - ~ Perfect mirror
    - Real and imaginary components of the material's index of refraction.
+ * - material
+   - |string|
+   - "none"
+   - Instead of eta, k a material name can be specified. Available presets are listed :ref:`here <bsdf-conductor-list>`.
  * - specular_reflectance
    - |color|
    - 1.0
@@ -214,6 +226,10 @@ Rough conductor (:monosp:`roughconductor`)
    - |color|
    - ~ Gold
    - Real and imaginary components of the material's index of refraction.
+ * - material
+   - |string|
+   - "none"
+   - Instead of eta, k a material name can be specified. Available presets are listed :ref:`here <bsdf-conductor-list>`.
  * - specular_reflectance
    - |color|
    - 1.0
@@ -253,8 +269,12 @@ Smooth plastic (:monosp:`plastic`)
    - TODO
  * - ext_ior, int_ior
    - |number|
-   - 1.00027, 1.55
-   - TODO
+   - vacuum, bk7   
+   - Specifies exterior and interior index of refraction.
+ * - ext_ior_material, int_ior_material
+   - |string|
+   - *None*, *None*
+   - Has to be one of the available presets listed :ref:`here <bsdf-dielectric-list>`.
 
 .. subfigstart::
 
@@ -284,9 +304,13 @@ Rough plastic (:monosp:`roughplastic`)
    - 0.5
    - TODO
  * - ext_ior, int_ior
-   - |number|
-   - 1.00027, 1.55
-   - TODO
+   - |number| 
+   - vacuum, bk7   
+   - Specifies exterior and interior index of refraction.
+ * - ext_ior_material, int_ior_material
+   - |string|
+   - *None*, *None*
+   - Has to be one of the available presets listed :ref:`here <bsdf-dielectric-list>`.
  * - alpha_u, alpha_v
    - |number|
    - 0.1, 0.1
@@ -359,8 +383,12 @@ Disney *Principled* (:monosp:`principled`)
    - TODO
  * - ior
    - |number|
-   - 1.55
-   - TODO
+   - bk7   
+   - Specifies index of refraction.
+ * - ior_material
+   - |string|
+   - *None*
+   - Has to be one of the available presets listed :ref:`here <bsdf-dielectric-list>`.
  * - thin
    - |bool|
    - false
@@ -393,6 +421,10 @@ Disney *Principled* (:monosp:`principled`)
    - |number|
    - 0.0
    - TODO
+ * - clearcoat_top_only
+   - |bool|
+   - true
+   - True if clearcoat should only be applied to the front side of the surface only.
  * - clearcoat_roughness
    - |number|
    - 0.1
@@ -527,7 +559,7 @@ Passthrough (:monosp:`passthrough`)
   :width: 0.6
   :label: fig-passthrough
 
-.. NOTE:: The :monosp:`passthrough` bsdf should be used carefully, as simple techniques like Next-Event Estimation still see the object geometry.
+.. WARNING:: The :monosp:`passthrough` bsdf should be used carefully, as simple techniques like Next-Event Estimation still see the object geometry.
 
 .. _bsdf-normalmap:
 
@@ -593,6 +625,38 @@ Bump mapping (:monosp:`bumpmap`)
   :width: 0.6
   :label: fig-bumpmap
 
+.. _bsdf-transform:
+
+Transform (:monosp:`transform`)
+-------------------------------
+
+.. objectparameters::
+
+ * - bsdf
+   - |bsdf|
+   - *None*
+   - Bsdf the normal transformation will be applied to.
+ * - normal
+   - |vector|
+   - (0,0,1)
+   - Normal to use instead of the callee normal (e.g., surface normal).
+ * - tangent
+   - |vector|
+   - *None*
+   - Tangent to use instead of the callee tangent (e.g., surface tangent). Will be calculated from the normal parameter if not set.
+
+.. subfigstart::
+
+.. figure::  images/mat_transform.jpg
+  :width: 90%
+  :align: center
+  
+  Normal transformed by a PExpr to mimic a normal map
+
+.. subfigend::
+  :width: 0.6
+  :label: fig-transform
+
 .. _bsdf-klems:
 
 Klems (:monosp:`klems`)
@@ -613,7 +677,7 @@ Klems (:monosp:`klems`)
    - (0, 0, 1)
    - Up vector
 
-.. NOTE:: The :monosp:`klems` bsdf is still experimental.
+.. WARNING:: The :monosp:`klems` bsdf is still experimental.
 
 .. _bsdf-tensortree:
 
@@ -635,4 +699,41 @@ TensorTree (:monosp:`tensortree`)
    - (0, 0, 1)
    - Up vector
 
-.. NOTE:: The :monosp:`tensortree` bsdf is still experimental.
+.. WARNING:: The :monosp:`tensortree` bsdf is still experimental.
+
+.. _bsdf-dielectric-list:
+
+List of preset index of refractions
+-----------------------------------
+
+Currently the following materials are available as presets:
+
+* **vacuum**
+* **bk7**
+* **glass** `same as bk7`
+* **helium**
+* **hydrogen**
+* **air**
+* **water**
+* **ethanol**
+* **diamond**
+* **polypropylene**
+
+.. _bsdf-conductor-list:
+
+List of preset conductors
+-------------------------
+
+Currently the following materials are available as presets:
+
+* **aluminum**
+* **brass**
+* **copper**
+* **gold**
+* **iron**
+* **lead**
+* **mercury**
+* **platinum**
+* **silver**
+* **titanium**
+* **none** `~ a perfect mirror`

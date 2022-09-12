@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.1...3.20)
+cmake_minimum_required(VERSION 3.9...3.20)
 
 if(${CMAKE_VERSION} VERSION_LESS 3.12)
     cmake_policy(VERSION ${CMAKE_MAJOR_VERSION}.${CMAKE_MINOR_VERSION})
@@ -41,6 +41,8 @@ set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake ${CMAKE_MODULE_PATH})
 set(CMAKE_DEBUG_POSTFIX  "_d")
 
 set(Ignis_VENDOR "Ignis project 2020-2022")
+set(Ignis_DESCRIPTION "Device agnostic raytracing framework with shared codebase for offline and realtime rendering and for CPU and GPU")
+set(Ignis_URL "https://github.com/PearCoding/Ignis")
 include(Git)
 
 message(STATUS "Building Ignis Rodent ${Ignis_VERSION}")
@@ -56,7 +58,22 @@ option(IG_WITH_PYTHON_API    "Build python API" ON)
 option(IG_WITH_TOOLS         "Build tools" ON)
 option(IG_WITH_DOCUMENTATION "Build the documentation if Sphinx is available on the system" ON)
 option(IG_WITH_ASSERTS       "Build with asserts even in release. It is always enabled on debug" OFF)
+option(IG_WITH_DENOISER      "Integrate Inten Open Image Denoise if available" ON)
 option(IG_USE_LTO 			 "Use linked time optimization if available in release" ON)
+
+if(${CMAKE_VERSION} VERSION_GREATER_EQUAL 3.21)
+	if(WIN32 OR (NOT CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT))
+		set(_default ON)
+	else()
+		set(_default OFF)
+	endif()
+	option(IG_INSTALL_RUNTIME_DEPENDENCIES "Install runtime libraries together with Ignis" ${_default})
+endif()
+
+if(IG_INSTALL_RUNTIME_DEPENDENCIES)
+	set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib")
+	set(_IG_RUNTIME_SET RUNTIME_DEPENDENCY_SET ignis_runtime_set)
+endif()
 
 # Setup artic clang flags
 if(APPLE)
@@ -95,6 +112,10 @@ find_package(TBB REQUIRED)
 # ZLib is used in the generator
 find_package(ZLIB REQUIRED)
 
+if(IG_WITH_DENOISER)
+	find_package(OpenImageDenoise)
+endif()
+
 include(cmake/GetDependencies.cmake)
 include(cmake/Install.cmake)
 include(cmake/ExtraUtils.cmake)
@@ -128,7 +149,7 @@ if(IG_HAS_UI)
 endif()
 
 if(IG_WITH_PYTHON_API)
-	find_package (Python3 COMPONENTS Development)
+	find_package (Python3 COMPONENTS Development Interpreter)
 	if(Python3_FOUND)
 		set(IG_HAS_PYTHON_API ON)
 	endif()
@@ -138,7 +159,6 @@ if(IG_HAS_PYTHON_API)
 	message(STATUS "Building with Python API")
 endif()
 
-configure_file(src/backend/runtime/config/Git.h.in     ${CMAKE_CURRENT_BINARY_DIR}/config/Git.h)
 configure_file(src/backend/runtime/config/Version.h.in ${CMAKE_CURRENT_BINARY_DIR}/config/Version.h)
 
 # Add warnings per default
@@ -147,6 +167,7 @@ if(MSVC)
 else()
   add_compile_options(-Wall -Wextra -pedantic)
 endif()
+
 # Traverse to underlying directories
 add_subdirectory(src)
 

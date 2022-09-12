@@ -80,15 +80,11 @@ PYBIND11_MODULE(pyignis, m)
         .def_readwrite("DumpShaderFull", &RuntimeOptions::DumpShaderFull)
         .def_readwrite("AcquireStats", &RuntimeOptions::AcquireStats)
         .def_readwrite("Device", &RuntimeOptions::Device)
+        .def_readwrite("SPI", &RuntimeOptions::SPI)
         .def_readwrite("OverrideCamera", &RuntimeOptions::OverrideCamera)
         .def_readwrite("OverrideTechnique", &RuntimeOptions::OverrideTechnique)
         .def_property(
             "ModulePath", [](const RuntimeOptions& opts) { return opts.ModulePath.generic_u8string(); }, [](RuntimeOptions& opts, const std::string& val) { opts.ModulePath = val; });
-
-    py::class_<RuntimeRenderSettings>(m, "RuntimeRenderSettings")
-        .def(py::init([]() { return RuntimeRenderSettings(); }))
-        .def_readwrite("FilmWidth", &RuntimeRenderSettings::FilmWidth)
-        .def_readwrite("FilmHeight", &RuntimeRenderSettings::FilmHeight);
 
     py::class_<Ray>(m, "Ray")
         .def(py::init([](const Vector3f& org, const Vector3f& dir) { return Ray{ org, dir, Vector2f(0, 1) }; }))
@@ -99,6 +95,7 @@ PYBIND11_MODULE(pyignis, m)
 
     py::enum_<Target>(m, "Target")
         .value("GENERIC", Target::GENERIC)
+        .value("SINGLE", Target::SINGLE)
         .value("ASIMD", Target::ASIMD)
         .value("SSE42", Target::SSE42)
         .value("AVX", Target::AVX)
@@ -115,21 +112,30 @@ PYBIND11_MODULE(pyignis, m)
             return data;
         })
         .def("reset", &Runtime::reset)
-        .def("getFramebuffer", [](const Runtime& r, uint32 aov) {
+        .def("getFramebuffer", [](const Runtime& r, const std::string& aov) {
+            // TODO: Iteration count?
             const size_t width  = r.framebufferWidth();
             const size_t height = r.framebufferHeight();
             return py::memoryview::from_buffer(
-                r.getFramebuffer(aov),                                                             // buffer pointer
+                r.getFramebuffer(aov).Data,                                                        // buffer pointer
                 std::vector<size_t>{ height, width, 3ul },                                         // shape (rows, cols)
                 std::vector<size_t>{ sizeof(float) * width * 3, sizeof(float) * 3, sizeof(float) } // strides in bytes
             );
         })
+        .def("setParameter", py::overload_cast<const std::string&, int>(&Runtime::setParameter))
+        .def("setParameter", py::overload_cast<const std::string&, float>(&Runtime::setParameter))
+        .def("setParameter", py::overload_cast<const std::string&, const Vector3f&>(&Runtime::setParameter))
+        .def("setParameter", py::overload_cast<const std::string&, const Vector4f&>(&Runtime::setParameter))
         .def("clearFramebuffer", py::overload_cast<>(&Runtime::clearFramebuffer))
-        .def("clearFramebuffer", py::overload_cast<size_t>(&Runtime::clearFramebuffer))
+        .def("clearFramebuffer", py::overload_cast<const std::string&>(&Runtime::clearFramebuffer))
         .def_property_readonly("iterationCount", &Runtime::currentIterationCount)
         .def_property_readonly("sampleCount", &Runtime::currentSampleCount)
         .def_property_readonly("framebufferWidth", &Runtime::framebufferWidth)
-        .def_property_readonly("framebufferHeight", &Runtime::framebufferHeight);
+        .def_property_readonly("framebufferHeight", &Runtime::framebufferHeight)
+        .def_property_readonly("technique", &Runtime::technique)
+        .def_property_readonly("camera", &Runtime::camera)
+        .def_property_readonly("target", &Runtime::target)
+        .def_property_readonly("spi", &Runtime::samplesPerIteration);
 
     py::class_<RuntimeWrap>(m, "RuntimeWrap")
         .def("__enter__", &RuntimeWrap::enter, py::return_value_policy::reference)

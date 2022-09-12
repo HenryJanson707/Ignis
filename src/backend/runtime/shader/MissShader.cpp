@@ -1,11 +1,12 @@
 #include "MissShader.h"
 #include "Logger.h"
+#include "ShaderUtils.h"
 #include "loader/Loader.h"
 #include "loader/LoaderCamera.h"
 #include "loader/LoaderLight.h"
 #include "loader/LoaderMedium.h"
 #include "loader/LoaderTechnique.h"
-#include "loader/ShaderUtils.h"
+#include "loader/LoaderUtils.h"
 #include "loader/ShadingTree.h"
 
 #include <sstream>
@@ -29,7 +30,7 @@ std::string MissShader::setup(LoaderContext& ctx)
         if (ctx.CurrentTechniqueVariantInfo().UsesAllLightsInMiss)
             stream << ShaderUtils::generateDatabase() << std::endl;
 
-        stream << LoaderLight::generate(tree, !ctx.CurrentTechniqueVariantInfo().UsesAllLightsInMiss)
+        stream << ctx.Lights->generate(tree, !ctx.CurrentTechniqueVariantInfo().UsesAllLightsInMiss)
                << std::endl;
     }
 
@@ -40,14 +41,14 @@ std::string MissShader::setup(LoaderContext& ctx)
     if (ctx.CurrentTechniqueVariantInfo().RequiresExplicitCamera)
         stream << LoaderCamera::generate(ctx) << std::endl;
 
-    stream << "  let spp = " << ctx.SamplesPerIteration << " : i32;" << std::endl;
+    stream << "  let spi = " << ShaderUtils::inlineSPI(ctx) << ";" << std::endl;
 
     // Will define technique
     stream << LoaderTechnique::generate(ctx) << std::endl
            << std::endl;
 
     stream << "  let use_framebuffer = " << (!ctx.CurrentTechniqueVariantInfo().LockFramebuffer ? "true" : "false") << ";" << std::endl
-           << "  device.handle_miss_shader(technique, first, last, spp, use_framebuffer)" << std::endl
+           << "  device.handle_miss_shader(technique, first, last, spi, use_framebuffer)" << std::endl
            << "}" << std::endl;
 
     return stream.str();

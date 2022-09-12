@@ -2,6 +2,7 @@
 
 #include "CameraOrientation.h"
 #include "Parser.h"
+#include "RuntimeSettings.h"
 #include "Target.h"
 #include "TechniqueInfo.h"
 #include "table/SceneDatabase.h"
@@ -15,15 +16,19 @@ struct LoaderOptions {
     IG::Target Target;
     std::string CameraType;
     std::string TechniqueType;
+    std::string PixelSamplerType;
     size_t FilmWidth;
     size_t FilmHeight;
     size_t SamplesPerIteration; // Only a recommendation!
     bool IsTracer;
+    bool ForceSpecialization;
+    DenoiserSettings Denoiser;
 };
 
 struct LoaderResult {
     SceneDatabase Database;
     std::vector<TechniqueVariant> TechniqueVariants;
+    std::vector<std::string> ResourceMap;
     IG::TechniqueInfo TechniqueInfo;
     IG::CameraOrientation CameraOrientation;
 };

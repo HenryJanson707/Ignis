@@ -7,7 +7,15 @@
 
 #include "imgui.h"
 #include "imgui_markdown.h"
-#include "imgui_sdl.h"
+
+#if SDL_VERSION_ATLEAST(2, 0, 17)
+#include "backends/imgui_impl_sdl.h"
+#include "backends/imgui_impl_sdlrenderer.h"
+#else
+#define USE_OLD_SDL
+// The following implementation is deprecated and only available for old SDL versions
+#include "imgui_old_sdl.h"
+#endif
 
 #include "Inspector.h"
 
@@ -130,18 +138,29 @@ public:
         Height = height;
         setupTextureBuffer((size_t)width, (size_t)height);
 
+#ifdef USE_OLD_SDL
         ImGuiSDL::Deinitialize();
         ImGuiSDL::Initialize(Renderer, width, height);
+#endif
     }
 
-    [[nodiscard]] inline const float* currentPixels() const
+    [[nodiscard]] inline std::string currentAOVName() const
     {
-        return Runtime->getFramebuffer(CurrentAOV);
+        if (CurrentAOV == 0)
+            return std::string{};
+        else
+            return Runtime->aovs().at(CurrentAOV - 1);
+    }
+
+    [[nodiscard]] inline AOVAccessor currentPixels() const
+    {
+        return Runtime->getFramebuffer(currentAOVName());
     }
 
     void changeAOV(int delta_aov)
     {
-        CurrentAOV = (CurrentAOV + delta_aov) % (Runtime->aovs().size() + 1);
+        const int rem = (int)Runtime->aovs().size() + 1;
+        CurrentAOV    = static_cast<size_t>((((int)CurrentAOV + delta_aov) % rem + rem) % rem);
     }
 
     enum MouseMode {
@@ -171,17 +190,25 @@ public:
         const bool canInteract = !LockInteraction && run;
 
         const auto handleRotation = [&](float xmotion, float ymotion) {
-            if (io.KeyAlt)
-                cam.rotate_fixroll(xmotion, ymotion);
-            else if (io.KeyCtrl)
+            if (io.KeyCtrl && io.KeyAlt) {
                 cam.rotate_around(sceneCenter, xmotion, ymotion);
-            else
+                cam.snap_up();
+            } else if (io.KeyAlt) {
+                cam.rotate_fixroll(xmotion, ymotion);
+            } else if (io.KeyCtrl) {
+                cam.rotate_around(sceneCenter, xmotion, ymotion);
+            } else {
                 cam.rotate(xmotion, ymotion);
+            }
         };
 
         SDL_Event event;
         const bool hover = ImGui::IsAnyItemHovered() || ImGui::IsWindowHovered(ImGuiHoveredFlags_AnyWindow);
         while (SDL_PollEvent(&event)) {
+#ifndef USE_OLD_SDL
+            ImGui_ImplSDL2_ProcessEvent(&event);
+#endif
+
             bool key_down = event.type == SDL_KEYDOWN;
             switch (event.type) {
             case SDL_TEXTINPUT:
@@ -512,11 +539,12 @@ public:
         return false;
     }
 
-    void analzeLuminance(size_t width, size_t height, size_t iter)
+    void analzeLuminance(size_t width, size_t height)
     {
-        ImageInfoSettings settings{ CurrentAOV,
+        const std::string aov_name = currentAOVName();
+        ImageInfoSettings settings{ aov_name.c_str(),
                                     Histogram.data(), Histogram.size(),
-                                    1.0f / iter };
+                                    1.0f };
         ImageInfoOutput output;
         Runtime->imageinfo(settings, output);
 
@@ -534,29 +562,28 @@ public:
             HistogramF[i] = Histogram[i] * avgFactor;
     }
 
-    void updateSurface(size_t iter)
+    void updateSurface()
     {
-        if (iter == 0)
-            iter = 1;
-
-        analzeLuminance(Width, Height, iter);
+        const std::string aov_name = currentAOVName();
+        analzeLuminance(Width, Height);
 
         // TODO: It should be possible to directly change the device buffer (if the computing device is the display device)... but thats very advanced
         uint32* buf = Buffer.data();
-        Runtime->tonemap(buf, TonemapSettings{ CurrentAOV, (size_t)ToneMappingMethod, ToneMappingGamma,
-                                               1.0f / iter,
+        Runtime->tonemap(buf, TonemapSettings{ aov_name.c_str(), (size_t)ToneMappingMethod, ToneMappingGamma,
+                                               1.0f,
                                                ToneMapping_Automatic ? 1 / LastLum.Est : std::pow(2.0f, ToneMapping_Exposure),
                                                ToneMapping_Automatic ? 0 : ToneMapping_Offset });
 
         SDL_UpdateTexture(Texture, nullptr, buf, static_cast<int>(Width * sizeof(uint32_t)));
     }
 
-    [[nodiscard]] inline RGB getFilmData(size_t width, size_t height, size_t iter, uint32_t x, uint32_t y)
+    [[nodiscard]] inline RGB getFilmData(size_t width, size_t height, uint32_t x, uint32_t y)
     {
         IG_UNUSED(height);
 
-        const float* film    = currentPixels();
-        const float inv_iter = 1.0f / iter;
+        const auto acc       = currentPixels();
+        const float* film    = acc.Data;
+        const float inv_iter = acc.IterationCount > 0 ? 1.0f / acc.IterationCount : 0.0f;
         const size_t ind     = y * width + x;
 
         return RGB{
@@ -566,14 +593,18 @@ public:
         };
     }
 
-    void makeScreenshot(size_t width, size_t height, size_t iter)
+    void makeScreenshot()
     {
         std::stringstream out_file;
         auto now       = std::chrono::system_clock::now();
         auto in_time_t = std::chrono::system_clock::to_time_t(now);
         out_file << "screenshot_" << std::put_time(std::localtime(&in_time_t), "%Y_%m_%d_%H_%M_%S") << ".exr";
 
-        if (!saveImageRGB(out_file.str(), currentPixels(), width, height, 1.0f / iter))
+        CameraOrientation orientation;
+        orientation.Eye = LastCameraPose.Eye;
+        orientation.Up  = LastCameraPose.Up;
+        orientation.Dir = LastCameraPose.Dir;
+        if (!saveImageOutput(out_file.str(), *Runtime, &orientation))
             IG_LOG(L_ERROR) << "Failed to save EXR file '" << out_file.str() << "'" << std::endl;
         else
             IG_LOG(L_INFO) << "Screenshot saved to '" << out_file.str() << "'" << std::endl;
@@ -658,7 +689,7 @@ public:
         if (ShowUI) {
             RGB rgb{ 0, 0, 0 };
             if (mouse_x >= 0 && mouse_x < (int)Width && mouse_y >= 0 && mouse_y < (int)Height)
-                rgb = getFilmData(Width, Height, iter, (uint32)mouse_x, (uint32)mouse_y);
+                rgb = getFilmData(Width, Height, (uint32)mouse_x, (uint32)mouse_y);
 
             ImGui::SetNextWindowPos(ImVec2(5, 5), ImGuiCond_Once);
             ImGui::SetNextWindowSize(ImVec2(UI_W, UI_H), ImGuiCond_Once);
@@ -762,17 +793,17 @@ public:
             ImGui::End();
         }
 
-        if (ShowInspector)
-            ui_inspect_image(mouse_x, mouse_y, Width, Height, iter == 0 ? 1 : 1.0f / iter, currentPixels(), Buffer.data());
+        if (ShowInspector) {
+            const auto acc = currentPixels();
+            ui_inspect_image(mouse_x, mouse_y, Width, Height, acc.IterationCount == 0 ? 1.0f : 1.0f / acc.IterationCount, acc.Data, Buffer.data());
+        }
     }
 };
 
 ////////////////////////////////////////////////////////////////
 
 UI::UI(SPPMode sppmode, Runtime* runtime, size_t width, size_t height, bool showDebug)
-    : mWidth(width)
-    , mHeight(height)
-    , mSPPMode(sppmode)
+    : mSPPMode(sppmode)
     , mDebugMode(DebugMode::Normal)
     , mInternal(std::make_unique<UIInternal>())
 {
@@ -793,7 +824,7 @@ UI::UI(SPPMode sppmode, Runtime* runtime, size_t width, size_t height, bool show
         SDL_WINDOWPOS_UNDEFINED,
         (int)width,
         (int)height,
-        SDL_WINDOW_RESIZABLE);
+        SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
 
     if (!mInternal->Window) {
         IG_LOG(L_FATAL) << "Cannot create SDL window: " << SDL_GetError() << std::endl;
@@ -801,7 +832,7 @@ UI::UI(SPPMode sppmode, Runtime* runtime, size_t width, size_t height, bool show
     }
     SDL_SetWindowMinimumSize(mInternal->Window, 64, 64);
 
-    mInternal->Renderer = SDL_CreateRenderer(mInternal->Window, -1, 0);
+    mInternal->Renderer = SDL_CreateRenderer(mInternal->Window, -1, SDL_RENDERER_PRESENTVSYNC | SDL_RENDERER_ACCELERATED);
     if (!mInternal->Renderer) {
         IG_LOG(L_FATAL) << "Cannot create SDL renderer: " << SDL_GetError() << std::endl;
         throw std::runtime_error("Could not setup UI");
@@ -812,12 +843,18 @@ UI::UI(SPPMode sppmode, Runtime* runtime, size_t width, size_t height, bool show
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
-    ImGuiIO& io = ImGui::GetIO();
-    (void)io;
-    // io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard; // if enabled -> ImGuiKey_Space has to be mapped
     ImGui::StyleColorsDark();
 
+    ImGuiIO& io = ImGui::GetIO();
+    (void)io;
+#ifndef USE_OLD_SDL
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+
+    ImGui_ImplSDL2_InitForSDLRenderer(mInternal->Window, mInternal->Renderer);
+    ImGui_ImplSDLRenderer_Init(mInternal->Renderer);
+#else
     ImGuiSDL::Initialize(mInternal->Renderer, (int)width, (int)height);
+#endif
 
     mInternal->PoseManager.load(POSE_FILE);
 
@@ -829,7 +866,12 @@ UI::UI(SPPMode sppmode, Runtime* runtime, size_t width, size_t height, bool show
 
 UI::~UI()
 {
+#ifndef USE_OLD_SDL
+    ImGui_ImplSDLRenderer_Shutdown();
+    ImGui_ImplSDL2_Shutdown();
+#else
     ImGuiSDL::Deinitialize();
+#endif
 
     SDL_DestroyTexture(mInternal->Texture);
     SDL_DestroyRenderer(mInternal->Renderer);
@@ -906,6 +948,7 @@ static void handleHelp()
 - *V* to increase (or with *Shift* to decrease) tonemapping offset.
   Step size can be decreased with *Strg/Ctrl*.
   Only works if automatic tonemapping is disabled.
+- *N/M* to switch to previous or next available AOV. 
 - *WASD* or arrow keys to travel through the scene.
 - *Q/E* to rotate the camera around the viewing direction. 
 - *PageUp/PageDown* to pan the camera up and down. 
@@ -918,6 +961,7 @@ static void handleHelp()
 - Mouse to rotate the camera. 
   Use with *Strg/Ctrl* to rotate the camera around the center of the scene.
   Use with *Alt* to enable first person camera behaviour.
+  Use with *Strg/Ctrl* + *Alt* to rotate the camera around the center of the scene and subsequently snap the up direction.
 )";
 
     ImGui::MarkdownConfig config;
@@ -932,10 +976,10 @@ static void handleHelp()
 
 void UI::update(size_t iter, size_t samples)
 {
-    mInternal->updateSurface(iter);
+    mInternal->updateSurface();
     switch (mInternal->ScreenshotRequest) {
     case ScreenshotRequestMode::Framebuffer:
-        mInternal->makeScreenshot(mWidth, mHeight, iter);
+        mInternal->makeScreenshot();
         mInternal->ScreenshotRequest = ScreenshotRequestMode::Nothing;
         break;
     case ScreenshotRequestMode::Full:
@@ -949,12 +993,21 @@ void UI::update(size_t iter, size_t samples)
     SDL_RenderCopy(mInternal->Renderer, mInternal->Texture, nullptr, nullptr);
 
     if (mInternal->ShowUI || mInternal->ShowInspector || mInternal->ShowHelp) {
+#ifndef USE_OLD_SDL
+        ImGui_ImplSDLRenderer_NewFrame();
+        ImGui_ImplSDL2_NewFrame();
+#endif
+
         ImGui::NewFrame();
         mInternal->handleImgui(iter, samples);
         if (mInternal->ShowHelp)
             handleHelp();
         ImGui::Render();
+#ifndef USE_OLD_SDL
+        ImGui_ImplSDLRenderer_RenderDrawData(ImGui::GetDrawData());
+#else
         ImGuiSDL::Render(ImGui::GetDrawData());
+#endif
     }
 
     SDL_RenderPresent(mInternal->Renderer);

@@ -1,5 +1,6 @@
 #include "Runtime.h"
 #include "Logger.h"
+#include "RuntimeInfo.h"
 #include "loader/Parser.h"
 
 #include <chrono>
@@ -34,6 +35,10 @@ static inline void setup_film(LoaderOptions& lopts, const RuntimeOptions& opts)
 
     lopts.FilmWidth  = std::max<size_t>(1, lopts.FilmWidth);
     lopts.FilmHeight = std::max<size_t>(1, lopts.FilmHeight);
+
+    lopts.PixelSamplerType = "independent";
+    if (film)
+        lopts.PixelSamplerType = to_lowercase(film->property("sampler").getString(lopts.PixelSamplerType));
 }
 
 static inline void setup_camera(LoaderOptions& lopts, const RuntimeOptions& opts)
@@ -54,7 +59,7 @@ static inline void setup_camera(LoaderOptions& lopts, const RuntimeOptions& opts
 static inline size_t recommendSPI(Target target, size_t width, size_t height, bool interactive)
 {
     // The "best" case was measured with a 1000 x 1000. It does depend on the scene content though, but thats ignored here
-    size_t spi_f = isCPU(target) ? 2 : 8;
+    size_t spi_f = TargetInfo(target).isCPU() ? 2 : 8;
     if (interactive)
         spi_f /= 2;
     const size_t spi = (size_t)std::ceil(spi_f / ((width / 1000.0f) * (height / 1000.0f)));
@@ -81,6 +86,7 @@ Runtime::Runtime(const RuntimeOptions& opts)
     , mCurrentFrame(0)
     , mFilmWidth(0)
     , mFilmHeight(0)
+    , mCameraName()
     , mInitialCameraOrientation()
     , mAcquireStats(opts.AcquireStats)
     , mTechniqueName()
@@ -88,6 +94,8 @@ Runtime::Runtime(const RuntimeOptions& opts)
     , mTechniqueVariants()
     , mTechniqueVariantShaderSets()
 {
+    checkCacheDirectory();
+
     if (!mManager.init(opts.ModulePath))
         throw std::runtime_error("Could not init modules!");
 
@@ -106,13 +114,13 @@ Runtime::Runtime(const RuntimeOptions& opts)
     const Target newTarget = mManager.resolveTarget(target);
     if (newTarget != target) {
         IG_LOG(L_WARNING) << "Switched from "
-                          << targetToString(target) << " to "
-                          << targetToString(newTarget) << std::endl;
+                          << TargetInfo(target).toString() << " to "
+                          << TargetInfo(newTarget).toString() << std::endl;
     }
     mTarget = newTarget;
 
     // Load interface
-    IG_LOG(L_INFO) << "Loading target " << targetToString(mTarget) << std::endl;
+    IG_LOG(L_INFO) << "Loading target " << TargetInfo(mTarget).toString() << std::endl;
     if (!mManager.load(mTarget, mLoadedInterface))
         throw std::runtime_error("Error loading interface!");
 
@@ -121,11 +129,6 @@ Runtime::Runtime(const RuntimeOptions& opts)
         IG_LOG(L_INFO) << "Loading standard library from " << mOptions.ScriptDir << std::endl;
         mScriptPreprocessor.loadStdLibFromDirectory(mOptions.ScriptDir);
     }
-
-    // Force flush to zero mode for denormals
-#if defined(__x86_64__) || defined(__amd64__) || defined(_M_X64)
-    _mm_setcsr(_mm_getcsr() | (_MM_FLUSH_ZERO_ON | _MM_DENORMALS_ZERO_ON));
-#endif
 }
 
 Runtime::~Runtime()
@@ -134,49 +137,84 @@ Runtime::~Runtime()
         shutdown();
 }
 
+void Runtime::checkCacheDirectory()
+{
+    constexpr size_t WarnSize = 1024 * 1024 * 1024 * 10ULL; // 10GB
+    const size_t size         = RuntimeInfo::cacheDirectorySize();
+    const auto dir            = RuntimeInfo::cacheDirectory();
+
+    if (dir.empty())
+        return;
+
+    if (size >= WarnSize)
+        IG_LOG(L_WARNING) << "Cache directory " << dir << " occupies " << FormatMemory(size) << " of disk space and exceeds " << FormatMemory(WarnSize) << " warn limit " << std::endl;
+    else
+        IG_LOG(L_DEBUG) << "Cache directory " << dir << " occupies " << FormatMemory(size) << " of disk space" << std::endl;
+}
+
 bool Runtime::loadFromFile(const std::filesystem::path& path)
 {
     // Parse scene file
     IG_LOG(L_DEBUG) << "Parsing scene file" << std::endl;
-    const auto startParser = std::chrono::high_resolution_clock::now();
-    Parser::SceneParser parser;
-    bool ok    = false;
-    auto scene = parser.loadFromFile(path, ok);
-    IG_LOG(L_DEBUG) << "Parsing scene took " << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - startParser).count() / 1000.0f << " seconds" << std::endl;
-    if (!ok)
+    try {
+        const auto startParser = std::chrono::high_resolution_clock::now();
+        Parser::SceneParser parser;
+        bool ok    = false;
+        auto scene = parser.loadFromFile(path, ok);
+        IG_LOG(L_DEBUG) << "Parsing scene took " << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - startParser).count() / 1000.0f << " seconds" << std::endl;
+        if (!ok)
+            return false;
+
+        if (mOptions.AddExtraEnvLight)
+            scene.addConstantEnvLight();
+
+        return load(path, std::move(scene));
+    } catch (const std::runtime_error& err) {
+        IG_LOG(L_ERROR) << "Loading error: " << err.what() << std::endl;
         return false;
-
-    if (mOptions.AddExtraEnvLight)
-        scene.addConstantEnvLight();
-
-    return load(path, std::move(scene));
+    }
 }
 
 bool Runtime::loadFromString(const std::string& str)
 {
     // Parse scene string
-    IG_LOG(L_DEBUG) << "Parsing scene string" << std::endl;
-    const auto startParser = std::chrono::high_resolution_clock::now();
-    Parser::SceneParser parser;
-    bool ok    = false;
-    auto scene = parser.loadFromString(str, ok);
-    IG_LOG(L_DEBUG) << "Parsing scene took " << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - startParser).count() / 1000.0f << " seconds" << std::endl;
-    if (!ok)
+    try {
+        IG_LOG(L_DEBUG) << "Parsing scene string" << std::endl;
+        const auto startParser = std::chrono::high_resolution_clock::now();
+        Parser::SceneParser parser;
+        bool ok    = false;
+        auto scene = parser.loadFromString(str, ok);
+        IG_LOG(L_DEBUG) << "Parsing scene took " << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - startParser).count() / 1000.0f << " seconds" << std::endl;
+        if (!ok)
+            return false;
+
+        if (mOptions.AddExtraEnvLight)
+            scene.addConstantEnvLight();
+
+        return load({}, std::move(scene));
+    } catch (const std::runtime_error& err) {
+        IG_LOG(L_ERROR) << "Loading error: " << err.what() << std::endl;
         return false;
-
-    if (mOptions.AddExtraEnvLight)
-        scene.addConstantEnvLight();
-
-    return load({}, std::move(scene));
+    }
 }
 
 bool Runtime::load(const std::filesystem::path& path, Parser::Scene&& scene)
 {
     LoaderOptions lopts;
-    lopts.FilePath = path;
-    lopts.Target   = mTarget;
-    lopts.IsTracer = mOptions.IsTracer;
-    lopts.Scene    = std::move(scene);
+    lopts.FilePath            = path;
+    lopts.Target              = mTarget;
+    lopts.IsTracer            = mOptions.IsTracer;
+    lopts.Scene               = std::move(scene);
+    lopts.ForceSpecialization = mOptions.ForceSpecialization;
+    lopts.Denoiser            = mOptions.Denoiser;
+    lopts.Denoiser.Enabled    = !mOptions.IsTracer && mOptions.Denoiser.Enabled && hasDenoiser();
+
+    // Print a warning if denoiser was requested but none is available
+    if (mOptions.Denoiser.Enabled && !lopts.Denoiser.Enabled && !mOptions.IsTracer && hasDenoiser())
+        IG_LOG(L_WARNING) << "Trying to use denoiser but no denoiser is available" << std::endl;
+
+    if (lopts.Denoiser.Enabled)
+        IG_LOG(L_INFO) << "Using denoiser" << std::endl;
 
     // Extract technique
     setup_technique(lopts, mOptions);
@@ -205,17 +243,22 @@ bool Runtime::load(const std::filesystem::path& path, Parser::Scene&& scene)
     mDatabase = std::move(result.Database);
     IG_LOG(L_DEBUG) << "Loading scene took " << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - startLoader).count() / 1000.0f << " seconds" << std::endl;
 
+    mCameraName               = lopts.CameraType;
     mTechniqueName            = lopts.TechniqueType;
     mTechniqueInfo            = result.TechniqueInfo;
     mInitialCameraOrientation = result.CameraOrientation;
     mTechniqueVariants        = std::move(result.TechniqueVariants);
+    mResourceMap              = std::move(result.ResourceMap);
+
+    if (lopts.Denoiser.Enabled)
+        mTechniqueInfo.EnabledAOVs.emplace_back("Denoised");
 
     return setup();
 }
 
-void Runtime::step()
+void Runtime::step(bool ignoreDenoiser)
 {
-    if (IG_UNLIKELY(mOptions.IsTracer)) {
+    if (mOptions.IsTracer) {
         IG_LOG(L_ERROR) << "Trying to use step() in a trace driver!" << std::endl;
         return;
     }
@@ -226,32 +269,41 @@ void Runtime::step()
     }
 
     if (mTechniqueInfo.VariantSelector) {
-        const auto& active = mTechniqueInfo.VariantSelector(mCurrentIteration);
-        for (const auto& ind : active)
-            stepVariant(ind);
+        const auto active = mTechniqueInfo.VariantSelector(mCurrentIteration);
+
+        IG_ASSERT(active.size() > 0, "Expected some variants to be returned by the technique variant selector");
+
+        for (size_t i = 0; i < active.size(); ++i)
+            stepVariant(ignoreDenoiser, active[i], i == active.size() - 1);
     } else {
         for (size_t i = 0; i < mTechniqueVariants.size(); ++i)
-            stepVariant((int)i);
+            stepVariant(ignoreDenoiser, (int)i, i == mTechniqueVariants.size() - 1);
     }
 
     ++mCurrentIteration;
 }
 
-void Runtime::stepVariant(size_t variant)
+void Runtime::stepVariant(bool ignoreDenoiser, size_t variant, bool lastVariant)
 {
     IG_ASSERT(variant < mTechniqueVariants.size(), "Expected technique variant to be well selected");
     const auto& info = mTechniqueInfo.Variants[variant];
 
     // IG_LOG(L_DEBUG) << "Rendering iteration " << mCurrentIteration << ", variant " << variant << std::endl;
 
-    DriverRenderSettings settings;
-    settings.rays               = nullptr; // No artifical ray streams
-    settings.device             = mDevice;
-    settings.spi                = info.GetSPI(mSamplesPerIteration);
-    settings.work_width         = info.GetWidth(mFilmWidth);
-    settings.work_height        = info.GetHeight(mFilmHeight);
-    settings.framebuffer_locked = info.LockFramebuffer;
+    // Only apply denoiser after the final pass
+    if (!lastVariant)
+        ignoreDenoiser = true;
 
+    DriverRenderSettings settings;
+    settings.rays           = nullptr; // No artificial ray streams
+    settings.device         = mDevice;
+    settings.apply_denoiser = mOptions.Denoiser.Enabled && !ignoreDenoiser;
+    settings.spi            = info.GetSPI(mSamplesPerIteration);
+    settings.work_width     = info.GetWidth(mFilmWidth);
+    settings.work_height    = info.GetHeight(mFilmHeight);
+    settings.info           = info;
+
+    setParameter("__spi", (int)settings.spi);
     mLoadedInterface.RenderFunction(mTechniqueVariantShaderSets[variant], settings, &mParameterSet, mCurrentIteration, mCurrentFrame);
 
     if (!info.LockFramebuffer)
@@ -260,7 +312,7 @@ void Runtime::stepVariant(size_t variant)
 
 void Runtime::trace(const std::vector<Ray>& rays, std::vector<float>& data)
 {
-    if (IG_UNLIKELY(!mOptions.IsTracer)) {
+    if (!mOptions.IsTracer) {
         IG_LOG(L_ERROR) << "Trying to use trace() in a camera driver!" << std::endl;
         return;
     }
@@ -282,7 +334,7 @@ void Runtime::trace(const std::vector<Ray>& rays, std::vector<float>& data)
     ++mCurrentIteration;
 
     // Get result
-    const float* data_ptr = getFramebuffer(0);
+    const float* data_ptr = getFramebuffer({}).Data;
     data.resize(rays.size() * 3);
     std::memcpy(data.data(), data_ptr, sizeof(float) * rays.size() * 3);
 }
@@ -295,13 +347,15 @@ void Runtime::traceVariant(const std::vector<Ray>& rays, size_t variant)
     // IG_LOG(L_DEBUG) << "Tracing iteration " << mCurrentIteration << ", variant " << variant << std::endl;
 
     DriverRenderSettings settings;
-    settings.rays               = rays.data();
-    settings.device             = mDevice;
-    settings.spi                = info.GetSPI(mSamplesPerIteration);
-    settings.work_width         = rays.size();
-    settings.work_height        = 1;
-    settings.framebuffer_locked = info.LockFramebuffer;
+    settings.rays           = rays.data();
+    settings.device         = mDevice;
+    settings.apply_denoiser = false;
+    settings.spi            = info.GetSPI(mSamplesPerIteration);
+    settings.work_width     = rays.size();
+    settings.work_height    = 1;
+    settings.info           = info;
 
+    setParameter("__spi", (int)settings.spi);
     mLoadedInterface.RenderFunction(mTechniqueVariantShaderSets[variant], settings, &mParameterSet, mCurrentIteration, mCurrentFrame);
 
     if (!info.LockFramebuffer)
@@ -316,19 +370,21 @@ void Runtime::resizeFramebuffer(size_t width, size_t height)
     reset();
 }
 
-const float* Runtime::getFramebuffer(size_t aov) const
+AOVAccessor Runtime::getFramebuffer(const std::string& name) const
 {
-    return mLoadedInterface.GetFramebufferFunction(aov);
+    DriverAOVAccessor acc;
+    mLoadedInterface.GetFramebufferFunction((int)mDevice, name.c_str(), acc);
+    return AOVAccessor{ acc.Data, acc.IterationCount };
 }
 
 void Runtime::clearFramebuffer()
 {
-    return mLoadedInterface.ClearFramebufferFunction(-1);
+    return mLoadedInterface.ClearAllFramebufferFunction();
 }
 
-void Runtime::clearFramebuffer(size_t aov)
+void Runtime::clearFramebuffer(const std::string& name)
 {
-    return mLoadedInterface.ClearFramebufferFunction((int)aov);
+    return mLoadedInterface.ClearFramebufferFunction(name.c_str());
 }
 
 void Runtime::reset()
@@ -354,12 +410,23 @@ bool Runtime::setup()
     settings.framebuffer_width  = (uint32)mFilmWidth;
     settings.framebuffer_height = (uint32)mFilmHeight;
     settings.acquire_stats      = mAcquireStats;
-    settings.aov_count          = mTechniqueInfo.EnabledAOVs.size();
+    settings.aov_map            = &mTechniqueInfo.EnabledAOVs;
+    settings.resource_map       = &mResourceMap;
 
     settings.logger = &IG_LOGGER;
 
     IG_LOG(L_DEBUG) << "Init driver" << std::endl;
     mLoadedInterface.SetupFunction(settings);
+
+    if (IG_LOGGER.verbosity() <= L_DEBUG) {
+        if (mResourceMap.empty()) {
+            IG_LOG(L_DEBUG) << "Registered resources: None" << std::endl;
+        } else {
+            IG_LOG(L_DEBUG) << "Registered resources:" << std::endl;
+            for (const auto& resource : mResourceMap)
+                IG_LOG(L_DEBUG) << " -> " << resource << std::endl;
+        }
+    }
 
     if (!compileShaders())
         return false;
@@ -383,53 +450,74 @@ bool Runtime::compileShaders()
 
         IG_LOG(L_DEBUG) << "Handling technique variant " << i << std::endl;
         IG_LOG(L_DEBUG) << "Compiling ray generation shader" << std::endl;
-        shaders.RayGenerationShader = compileShader(variant.RayGenerationShader, "ig_ray_generation_shader", "v" + std::to_string(i) + "_rayGeneration");
-        if (shaders.RayGenerationShader == nullptr) {
+        shaders.RayGenerationShader.Exec          = compileShader(variant.RayGenerationShader.Exec, "ig_ray_generation_shader", "v" + std::to_string(i) + "_rayGeneration");
+        shaders.RayGenerationShader.LocalRegistry = variant.RayGenerationShader.LocalRegistry;
+        if (shaders.RayGenerationShader.Exec == nullptr) {
             IG_LOG(L_ERROR) << "Failed to compile ray generation shader in variant " << i << "." << std::endl;
             return false;
         }
 
         IG_LOG(L_DEBUG) << "Compiling miss shader" << std::endl;
-        shaders.MissShader = compileShader(variant.MissShader, "ig_miss_shader", "v" + std::to_string(i) + "_missShader");
-        if (shaders.MissShader == nullptr) {
+        shaders.MissShader.Exec          = compileShader(variant.MissShader.Exec, "ig_miss_shader", "v" + std::to_string(i) + "_missShader");
+        shaders.MissShader.LocalRegistry = variant.MissShader.LocalRegistry;
+        if (shaders.MissShader.Exec == nullptr) {
             IG_LOG(L_ERROR) << "Failed to compile miss shader in variant " << i << "." << std::endl;
             return false;
         }
 
         IG_LOG(L_DEBUG) << "Compiling hit shaders" << std::endl;
         for (size_t j = 0; j < variant.HitShaders.size(); ++j) {
-            IG_LOG(L_DEBUG) << "Hit shader [" << j << "]" << std::endl;
-            shaders.HitShaders.push_back(compileShader(variant.HitShaders[j].c_str(), "ig_hit_shader", "v" + std::to_string(i) + "_hitShader" + std::to_string(j)));
-            if (shaders.HitShaders[j] == nullptr) {
+            IG_LOG(L_DEBUG) << "Compiling Hit shader [" << j << "]" << std::endl;
+            ShaderOutput<void*> result = {
+                compileShader(variant.HitShaders[j].Exec, "ig_hit_shader", "v" + std::to_string(i) + "_hitShader" + std::to_string(j)),
+                variant.HitShaders[j].LocalRegistry
+            };
+            shaders.HitShaders.push_back(result);
+            if (result.Exec == nullptr) {
                 IG_LOG(L_ERROR) << "Failed to compile hit shader " << j << " in variant " << i << "." << std::endl;
                 return false;
             }
         }
 
-        if (!variant.AdvancedShadowHitShader.empty()) {
+        if (!variant.AdvancedShadowHitShaders.empty()) {
             IG_LOG(L_DEBUG) << "Compiling advanced shadow shaders" << std::endl;
-            shaders.AdvancedShadowHitShader = compileShader(variant.AdvancedShadowHitShader.c_str(), "ig_advanced_shadow_shader", "v" + std::to_string(i) + "_advancedShadowHit");
 
-            if (shaders.AdvancedShadowHitShader == nullptr) {
-                IG_LOG(L_ERROR) << "Failed to compile advanced shadow hit shader in variant " << i << "." << std::endl;
-                return false;
+            for (size_t j = 0; j < variant.AdvancedShadowHitShaders.size(); ++j) {
+                IG_LOG(L_DEBUG) << "Compiling Advanced Shadow Hit shader [" << j << "]" << std::endl;
+                ShaderOutput<void*> result = {
+                    compileShader(variant.AdvancedShadowHitShaders[j].Exec, "ig_advanced_shadow_shader", "v" + std::to_string(i) + "_advancedShadowHit" + std::to_string(j)),
+                    variant.AdvancedShadowHitShaders[j].LocalRegistry
+                };
+                shaders.AdvancedShadowHitShaders.push_back(result);
+
+                if (shaders.AdvancedShadowHitShaders[j].Exec == nullptr) {
+                    IG_LOG(L_ERROR) << "Failed to compile advanced shadow hit shader " << j << " in variant " << i << "." << std::endl;
+                    return false;
+                }
             }
 
-            shaders.AdvancedShadowMissShader = compileShader(variant.AdvancedShadowMissShader.c_str(), "ig_advanced_shadow_shader", "v" + std::to_string(i) + "_advancedShadowMiss");
-
-            if (shaders.AdvancedShadowMissShader == nullptr) {
-                IG_LOG(L_ERROR) << "Failed to compile advanced shadow miss shader in variant " << i << "." << std::endl;
-                return false;
+            for (size_t j = 0; j < variant.AdvancedShadowMissShaders.size(); ++j) {
+                IG_LOG(L_DEBUG) << "Compiling Advanced Shadow Miss shader [" << j << "]" << std::endl;
+                ShaderOutput<void*> result = {
+                    compileShader(variant.AdvancedShadowMissShaders[j].Exec, "ig_advanced_shadow_shader", "v" + std::to_string(i) + "_advancedShadowMiss" + std::to_string(j)),
+                    variant.AdvancedShadowMissShaders[j].LocalRegistry
+                };
+                shaders.AdvancedShadowMissShaders.push_back(result);
+                if (shaders.AdvancedShadowMissShaders[j].Exec == nullptr) {
+                    IG_LOG(L_ERROR) << "Failed to compile advanced shadow miss shader " << j << " in variant " << i << "." << std::endl;
+                    return false;
+                }
             }
         }
 
         for (size_t j = 0; j < variant.CallbackShaders.size(); ++j) {
-            if (variant.CallbackShaders.at(j).empty()) {
-                shaders.CallbackShaders[j] = nullptr;
+            if (variant.CallbackShaders.at(j).Exec.empty()) {
+                shaders.CallbackShaders[j].Exec = nullptr;
             } else {
                 IG_LOG(L_DEBUG) << "Compiling callback shader [" << i << "]" << std::endl;
-                shaders.CallbackShaders[j] = compileShader(variant.CallbackShaders.at(j), "ig_callback_shader", "v" + std::to_string(i) + "_callback" + std::to_string(j));
-                if (shaders.CallbackShaders.at(j) == nullptr) {
+                shaders.CallbackShaders[j].Exec          = compileShader(variant.CallbackShaders.at(j).Exec, "ig_callback_shader", "v" + std::to_string(i) + "_callback" + std::to_string(j));
+                shaders.CallbackShaders[j].LocalRegistry = variant.CallbackShaders.at(j).LocalRegistry;
+                if (shaders.CallbackShaders.at(j).Exec == nullptr) {
                     IG_LOG(L_ERROR) << "Failed to compile callback " << j << " shader in variant " << i << "." << std::endl;
                     return false;
                 }
@@ -451,7 +539,7 @@ void* Runtime::compileShader(const std::string& src, const std::string& func, co
     if (mOptions.DumpShaderFull)
         dumpShader(name + "_full.art", full_shader);
 
-    return mLoadedInterface.CompileSourceFunction(full_shader.c_str(), func.c_str());
+    return mLoadedInterface.CompileSourceFunction(full_shader.c_str(), func.c_str(), IG_LOGGER.verbosity() == L_DEBUG);
 }
 
 void Runtime::tonemap(uint32* out_pixels, const TonemapSettings& settings)

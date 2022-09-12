@@ -16,8 +16,7 @@ CPMAddPackage(
 
 SET(SRC_FILES 
     main.cpp
-    imgui_sdl.cpp
-    imgui_sdl.h
+    imgui_impl.cpp
     Inspector.cpp
     Inspector.h
     Pose.cpp
@@ -31,4 +30,4 @@ target_link_libraries(igview PRIVATE ${SDL2_LIBRARY} ig_lib_common)
 add_dependencies(igview ignis_drivers)
 add_lto(igview)
 add_checks(igview)
-install(TARGETS igview COMPONENT runtime)
+install(TARGETS igview ${_IG_RUNTIME_SET} COMPONENT frontends)

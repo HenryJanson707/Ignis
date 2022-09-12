@@ -55,7 +55,7 @@ All available types are:
 -   ``vec4`` Four-dimensional vector. Is used also as a color.
 -   ``str`` String.
 
-Vectorized types like ``vec2``, ``vec3`` and ``vec4`` can be cast or extended to eachother by the access/swizzle operation like:
+Vectorized types like ``vec2``, ``vec3`` and ``vec4`` can be cast or extended to each other by the access/swizzle operation like:
 
 .. code-block:: maxima
 
@@ -103,6 +103,7 @@ Functions
 -   ``ceil`` TODO
 -   ``cellnoise`` TODO
 -   ``cfbm`` TODO
+-   ``checkerboard`` TODO
 -   ``clamp`` TODO
 -   ``cnoise`` TODO
 -   ``color`` TODO
@@ -119,6 +120,8 @@ Functions
 -   ``fbm`` TODO
 -   ``floor`` TODO
 -   ``hash`` TODO
+-   ``hsltorgb`` TODO
+-   ``hsvtorgb`` TODO
 -   ``length`` TODO
 -   ``log`` TODO
 -   ``log10`` TODO
@@ -131,6 +134,9 @@ Functions
 -   ``pnoise`` TODO
 -   ``pow`` TODO
 -   ``rad`` TODO
+-   ``rgbtohsl`` TODO
+-   ``rgbtohsv`` TODO
+-   ``rgbtoxyz`` TODO
 -   ``round`` TODO
 -   ``select`` TODO
 -   ``sin`` TODO
@@ -145,6 +151,7 @@ Functions
 -   ``vec3`` TODO
 -   ``vec4`` TODO
 -   ``voronoi`` TODO
+-   ``xyztorgb`` TODO
 
 .. NOTE:: More functions will be added in the future.
 
