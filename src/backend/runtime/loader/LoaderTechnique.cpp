@@ -240,10 +240,9 @@ static TechniqueInfo path_get_info(const std::string&, const std::shared_ptr<Par
         stream << ShaderUtils::generateDatabase() << std::endl;
 
         ShadingTree tree(ctx);
-        LoaderLight loaderLight;
-        loaderLight.setup(ctx);
+        stream << ctx.Lights->generate(tree, false) << std::endl;
+        stream << ctx.Lights->generateLightSelector("", tree);
 
-        stream << loaderLight.generate(tree, false) << std::endl;
         stream << "  let (film_width, film_height) = device.get_film_size();" << std::endl;
         stream << "  let spp = " << ctx.SamplesPerIteration << " : i32;" << std::endl;
         //The Buffer Size is far too big!!
@@ -255,8 +254,7 @@ static TechniqueInfo path_get_info(const std::string&, const std::shared_ptr<Par
         stream << "     offset," << std::endl;
         stream << "     flt_max," << std::endl;
         stream << "     buf," << std::endl;
-        stream << "     num_lights," << std::endl;
-        stream << "     lights,"  << std::endl;
+        stream << "     light_selector,"  << std::endl;
         stream << "     max_depth_light);" << std::endl;//TODO Find a better to set a max depth
 
         IG_ASSERT(!gen.empty(), "Generator function can not be empty!");
@@ -316,15 +314,12 @@ static void path_body_loader(std::ostream& stream, const std::string&, const std
             << "    }" << std::endl
             << "  };" << std::endl;
 
-        stream << "  let technique = make_path_renderer(" << max_depth << ", num_lights, lights, aovs, buf, buf_camera, max_depth_light);" << std::endl;
+        ShadingTree tree(ctx);
+        stream << ctx.Lights->generateLightSelector(ls, tree);
+        stream << "  let technique = make_path_renderer(" << max_depth << ", light_selector, aovs, buf, buf_camera, max_depth_light);" << std::endl;
     }else{
         stream << "  let technique = make_light_renderer(buf, max_depth_light);" << std::endl;
     }
-
-    ShadingTree tree(ctx);
-    stream << ctx.Lights->generateLightSelector(ls, tree);
-
-    stream << "  let technique = make_path_renderer(" << max_depth << ", light_selector, aovs, " << clamp_value << ");" << std::endl;
 }
 
 static void path_header_loader(std::ostream& stream, const std::string&, const std::shared_ptr<Parser::Object>&, const LoaderContext& ctx)
@@ -334,7 +329,7 @@ static void path_header_loader(std::ostream& stream, const std::string&, const s
 
     constexpr int C = 1 /* MIS */ + 3 /* Contrib */ + 1 /* Depth */ + 1 /* Eta */;
     stream << "static RayPayloadComponents = " << C << ";" << std::endl
-           << "fn init_raypayload() = init_pt_raypayload();" << std::endl;
+           << "fn init_raypayload() = init_vpt_raypayload();" << std::endl;
 }
 
 /////////////////////////
