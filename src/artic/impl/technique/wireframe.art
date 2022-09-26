@@ -3,17 +3,25 @@ struct WireframeRayPayload {
     distance: f32
 }
 
-fn wrap_wireframeraypayload(payload: WireframeRayPayload) -> RayPayload {
-    let mut r : RayPayload;
-    r.components(0) = payload.depth as f32;
-    r.components(1) = payload.distance;
-    r
+fn write_wireframeraypayload(payload: RayPayload, wrp: WireframeRayPayload) {
+    payload.store_vec2(0, make_vec2(wrp.depth as f32, wrp.distance));
 }
 
-fn unrap_wireframeraypayload(payload: RayPayload) = WireframeRayPayload {
-    depth    = payload.components(0) as i32,
-    distance = payload.components(1),
-};
+fn unrap_wireframeraypayload(payload: RayPayload) -> WireframeRayPayload {
+    let c0 = payload.load_vec2(0);
+    WireframeRayPayload {
+        depth    = c0.x as i32,
+        distance = c0.y,
+    }
+}
+
+fn @init_wireframeraypayload(payload: RayPayload, _: i32, _:i32, _:i32) = write_wireframeraypayload(payload,
+    WireframeRayPayload {
+        depth = 1,
+        distance = 0
+    });
+
+fn @make_wireframe_emitter_payload_initializer() = EmitterPayloadInitializer{ init = init_wireframeraypayload, count = 2 };
 
 fn @make_wireframe_renderer(camera: Camera) -> Technique {
     let offset:f32 = 0.001;
@@ -43,19 +51,17 @@ fn @make_wireframe_renderer(camera: Camera) -> Technique {
                 , _rnd: &mut RndState
                 , payload: RayPayload
                 , _mat: Material
-        ) -> Option[(Ray, RayPayload)] {
+        ) -> Option[Ray] {
         let wpt = unrap_wireframeraypayload(payload);
         let (is_edge, _) = is_edge_hit(ctx.pixel, ctx.hit, ctx.surf, wpt.distance);
         if !is_edge { 
-            make_option(
-                make_ray(ctx.surf.point, ctx.ray.dir, offset, flt_max, ray_flag_bounce),
-                wrap_wireframeraypayload(WireframeRayPayload{
-                    depth    = wpt.depth + 1,
-                    distance = wpt.distance + ctx.hit.distance,
-                })
-            )
+            write_wireframeraypayload(payload, WireframeRayPayload{
+                depth    = wpt.depth + 1,
+                distance = wpt.distance + ctx.hit.distance,
+            });
+            make_option(make_ray(ctx.surf.point, ctx.ray.dir, offset, flt_max, ray_flag_bounce))
         } else {
-            Option[(Ray, RayPayload)]::None
+            Option[Ray]::None
         }
     }
 
@@ -66,5 +72,7 @@ fn @make_wireframe_renderer(camera: Camera) -> Technique {
         on_bounce      = on_bounce,
         on_shadow_hit  = TechniqueNoShadowHitFunction,
         on_shadow_miss = TechniqueNoShadowMissFunction,
+        primary_payload_count   = 2,
+        secondary_payload_count = 0,
     }
 }

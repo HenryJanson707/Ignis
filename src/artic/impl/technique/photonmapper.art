@@ -117,56 +117,59 @@ struct PPMRayPayload {
     path_type:       i32, // 0 -> delta, 1 -> single diffuse bounce, 2+ -> multiple diffuse bounces
 }
 
-fn @wrap_ppmraypayload(payload: PPMRayPayload) -> RayPayload {
-    let mut r : RayPayload;
-    r.components(0) = payload.contrib.r;
-    r.components(1) = payload.contrib.g;
-    r.components(2) = payload.contrib.b;
-    r.components(3) = payload.depth as f32;    // FIXME: Weird behavior. We have to use a cast instead of a bitcast, else it does not work...
-    r.components(4) = payload.eta;
-    r.components(5) = payload.radius_or_light;
-    r.components(6) = payload.path_type as f32;
-    r
+fn @write_ppmraypayload(payload: RayPayload, ppm: PPMRayPayload) {
+    payload.store_vec4(0, make_vec4(ppm.contrib.r, ppm.contrib.g, ppm.contrib.b, ppm.depth as f32));
+    payload.store_vec3(4, make_vec3(ppm.eta, ppm.radius_or_light, ppm.path_type as f32));
 }
 
-fn @unwrap_ppmraypayload(payload: RayPayload) = PPMRayPayload {
-    contrib         = make_color(payload.components(0), payload.components(1), payload.components(2), 1),
-    depth           = payload.components(3) as i32,
-    eta             = payload.components(4),
-    radius_or_light = payload.components(5),
-    path_type       = payload.components(6) as i32,
-};
+fn @unwrap_ppmraypayload(payload: RayPayload) -> PPMRayPayload {
+    let c0 = payload.load_vec4(0);
+    let c1 = payload.load_vec3(4);
+    PPMRayPayload {
+        contrib         = make_color(c0.x, c0.y, c0.z, 1),
+        depth           = c0.w as i32,
+        eta             = c1.x,
+        radius_or_light = c1.y,
+        path_type       = c1.z as i32,
+    }
+}
 
-fn init_ppm_raypayload() = wrap_ppmraypayload(PPMRayPayload { contrib = color_builtins::white, depth = 1, eta = 1, radius_or_light = 0, path_type = 0 });
+fn @init_ppmraypayload(payload: RayPayload, _: i32, _:i32, _:i32) = write_ppmraypayload(payload,
+    PPMRayPayload { contrib = color_builtins::white, depth = 1, eta = 1, radius_or_light = 0, path_type = 0 });
+
+fn @make_ppm_emitter_payload_initializer() = EmitterPayloadInitializer{ init = init_ppmraypayload, count = 7 };
 
 /////////////////////////////////////
 fn @make_ppm_light_emitter(light_selector: LightSelector, iter: i32) -> RayEmitter {
     let offset = 0.001:f32;
 
-    @ |sample, x, y, _width, _height| {
-        let mut hash = fnv_init();
-        hash = fnv_hash(hash, sample as u32);
-        hash = fnv_hash(hash, iter as u32);
-        hash = fnv_hash(hash, x as u32);
-        hash = fnv_hash(hash, y as u32);
-        let mut rnd = hash /*as RndState*/;
-        
-        let (light, light_pdf) = light_selector.sample(&mut rnd, vec3_expand(0));
-        let sample_emission    = light.sample_emission;
-        let light_sample       = @sample_emission(rnd);
-        
-        let ray      = make_ray(light_sample.pos, light_sample.dir, select(light.infinite, 0:f32, offset), flt_max, ray_flag_light);
-        let radiance = color_mulf(light_sample.intensity, safe_div(math_builtins::fabs(light_sample.cos), light_pdf));
-        
-        let payload = wrap_ppmraypayload(PPMRayPayload {
-            contrib         = radiance,
-            depth           = 1,
-            eta             = 1,
-            radius_or_light = light.id as f32,
-            path_type       = 0 // Not used
-        });
+    RayEmitter {
+        generate = @ |sample, x, y, _width, _height, payload| {
+            let mut hash = fnv_init();
+            hash = fnv_hash(hash, sample as u32);
+            hash = fnv_hash(hash, iter as u32);
+            hash = fnv_hash(hash, x as u32);
+            hash = fnv_hash(hash, y as u32);
+            let mut rnd = hash /*as RndState*/;
+            
+            let (light, light_pdf) = light_selector.sample(&mut rnd, vec3_expand(0));
+            let sample_emission    = light.sample_emission;
+            let light_sample       = @sample_emission(rnd);
+            
+            let ray      = make_ray(light_sample.pos, light_sample.dir, select(light.infinite, 0:f32, offset), flt_max, ray_flag_light);
+            let radiance = color_mulf(light_sample.intensity, safe_div(math_builtins::fabs(light_sample.cos), light_pdf));
+            
+            write_ppmraypayload(payload, PPMRayPayload {
+                contrib         = radiance,
+                depth           = 1,
+                eta             = 1,
+                radius_or_light = light.id as f32,
+                path_type       = 0 // Not used
+            });
 
-        (ray, rnd, payload)
+            (ray, rnd)
+        },
+        payload_count = 7
     }
 }
 
@@ -205,7 +208,7 @@ fn @make_ppm_light_renderer(max_path_len: i32, _aovs: AOVTable, light_cache: Lig
                  , rnd: &mut RndState
                  , payload: RayPayload
                  , mat: Material
-                 ) -> Option[(Ray, RayPayload)] {
+                 ) -> Option[Ray] {
         let pt = unwrap_ppmraypayload(payload);
 
         // Bounce until a diffuse element is found or max path-1 length is reached
@@ -215,21 +218,21 @@ fn @make_ppm_light_renderer(max_path_len: i32, _aovs: AOVTable, light_cache: Lig
             if let Option[BsdfSample]::Some(mat_sample) = mat.bsdf.sample(rnd, out_dir, true) {
                 let contrib = color_mul(pt.contrib, mat_sample.color/* Pdf and cosine are already applied!*/);
                 if color_average(contrib) > flt_eps {
+                    write_ppmraypayload(payload, PPMRayPayload {
+                        contrib         = contrib,
+                        depth           = pt.depth + 1,
+                        eta             = pt.eta * mat_sample.eta,
+                        radius_or_light = pt.radius_or_light,
+                        path_type       = pt.path_type, // Not used
+                    });
                     return(make_option(
-                        make_ray(ctx.surf.point, mat_sample.in_dir, offset, flt_max, ray_flag_bounce),
-                        wrap_ppmraypayload(PPMRayPayload {
-                            contrib         = contrib,
-                            depth           = pt.depth + 1,
-                            eta             = pt.eta * mat_sample.eta,
-                            radius_or_light = pt.radius_or_light,
-                            path_type       = pt.path_type, // Not used
-                        })
+                        make_ray(ctx.surf.point, mat_sample.in_dir, offset, flt_max, ray_flag_bounce)
                     ))
                 }
             }
         }
 
-        Option[(Ray, RayPayload)]::None
+        Option[Ray]::None
     }
 
     Technique {
@@ -239,6 +242,8 @@ fn @make_ppm_light_renderer(max_path_len: i32, _aovs: AOVTable, light_cache: Lig
         on_bounce      = on_bounce,
         on_shadow_hit  = TechniqueNoShadowHitFunction,
         on_shadow_miss = TechniqueNoShadowMissFunction,
+        primary_payload_count   = 6,
+        secondary_payload_count = 0,
     }
 }
 
@@ -366,11 +371,11 @@ fn @make_ppm_path_renderer(max_path_len: i32, light_selector: LightSelector, rad
                  , rnd: &mut RndState
                  , payload: RayPayload
                  , mat: Material
-                 ) -> Option[(Ray, RayPayload)] {
+                 ) -> Option[Ray] {
         let pt = unwrap_ppmraypayload(payload);
 
         if pt.depth + 1 > max_path_len {
-            return(Option[(Ray, RayPayload)]::None)
+            return(Option[Ray]::None)
         }
 
         // Bounce
@@ -379,23 +384,23 @@ fn @make_ppm_path_renderer(max_path_len: i32, light_selector: LightSelector, rad
             let contrib = color_mul(pt.contrib, mat_sample.color/* Pdf and cosine are already applied!*/);
             let rr_prob = russian_roulette_pbrt(color_mulf(contrib, pt.eta * pt.eta), 0.95);
             if randf(rnd) >= rr_prob {
-                return(Option[(Ray, RayPayload)]::None)
+                return(Option[Ray]::None)
             }
 
             let new_contrib = color_mulf(contrib, 1 / rr_prob);
 
+            write_ppmraypayload(payload, PPMRayPayload {
+                contrib         = new_contrib,
+                depth           = pt.depth + 1,
+                eta             = pt.eta * mat_sample.eta,
+                radius_or_light = get_radius(ctx.hit, pt),
+                path_type       = select(mat.bsdf.is_specular, pt.path_type, /*pt.path_type +*/ 1)
+            });
             make_option(
-                make_ray(ctx.surf.point, mat_sample.in_dir, offset, flt_max, ray_flag_bounce),
-                wrap_ppmraypayload(PPMRayPayload {
-                    contrib         = new_contrib,
-                    depth           = pt.depth + 1,
-                    eta             = pt.eta * mat_sample.eta,
-                    radius_or_light = get_radius(ctx.hit, pt),
-                    path_type       = select(mat.bsdf.is_specular, pt.path_type, /*pt.path_type +*/ 1)
-                })
+                make_ray(ctx.surf.point, mat_sample.in_dir, offset, flt_max, ray_flag_bounce)
             )
         } else {
-            Option[(Ray, RayPayload)]::None
+            Option[Ray]::None
         }
     }
 
@@ -406,6 +411,8 @@ fn @make_ppm_path_renderer(max_path_len: i32, light_selector: LightSelector, rad
         on_bounce      = on_bounce,
         on_shadow_hit  = TechniqueNoShadowHitFunction,
         on_shadow_miss = TechniqueNoShadowMissFunction,
+        primary_payload_count   = 7,
+        secondary_payload_count = 0,
     }
 }
 
