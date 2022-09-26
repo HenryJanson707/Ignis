@@ -231,9 +231,13 @@ static TechniqueInfo path_get_info(const std::string&, const std::shared_ptr<Par
     
     auto light_camera = [] (LoaderContext& ctx){
         std::stringstream stream;
-        stream << LoaderTechnique::generateHeader(ctx, true) << std::endl;
+        //stream << LoaderTechnique::generateHeader(ctx, true) << std::endl;
 
         stream << "#[export] fn ig_ray_generation_shader(settings: &Settings, iter: i32, id: &mut i32, size: i32, xmin: i32, ymin: i32, xmax: i32, ymax: i32) -> i32 {" << std::endl;
+        // stream << LoaderCamera::generate(ctx) << std::endl; // Will set `camera`
+        
+        stream << std::endl << "  let spi = " << ShaderUtils::inlineSPI(ctx) << ";" << std::endl;
+        
         stream << "  " << ShaderUtils::constructDevice(ctx.Target) << std::endl;
         stream << std::endl;
 
@@ -242,6 +246,7 @@ static TechniqueInfo path_get_info(const std::string&, const std::shared_ptr<Par
         ShadingTree tree(ctx);
         stream << ctx.Lights->generate(tree, false) << std::endl;
         stream << ctx.Lights->generateLightSelector("", tree);
+
 
         stream << "  let (film_width, film_height) = device.get_film_size();" << std::endl;
         stream << "  let spp = " << ctx.SamplesPerIteration << " : i32;" << std::endl;
@@ -258,7 +263,17 @@ static TechniqueInfo path_get_info(const std::string&, const std::shared_ptr<Par
         stream << "     max_depth_light);" << std::endl;//TODO Find a better to set a max depth
 
         IG_ASSERT(!gen.empty(), "Generator function can not be empty!");
-        stream << "  let emitter = make_camera_emitter(camera, iter, spp, make_uniform_pixel_sampler()/*make_mjitt_pixel_sampler(4,4)*/, init_raypayload);" << std::endl;
+
+        std::string pixel_sampler = "make_uniform_pixel_sampler()";
+        if (ctx.PixelSamplerType == "halton") {
+            stream << "  let halton_setup = setup_halton_pixel_sampler(device, settings.width, settings.height, iter, xmin, ymin, xmax, ymax);" << std::endl;
+            pixel_sampler = "make_halton_pixel_sampler(halton_setup)";
+        } else if (ctx.PixelSamplerType == "mjitt") {
+            pixel_sampler = "make_mjitt_pixel_sampler(4, 4)";
+        }
+
+        stream << "  let emitter = make_camera_emitter(camera, iter, spi, " << pixel_sampler << ", " << ctx.CurrentTechniqueVariantInfo().GetEmitterPayloadInitializer() << "());" << std::endl;
+        // stream << "  let emitter = make_camera_emitter(camera, iter, spp, make_uniform_pixel_sampler()/*make_mjitt_pixel_sampler(4,4)*/, init_raypayload);" << std::endl;
 
         stream << "  device.generate_rays(emitter, id, size, xmin, ymin, xmax, ymax, spp)" << std::endl
         << "}" << std::endl;
@@ -525,24 +540,22 @@ static const struct TechniqueEntry {
     const char* Name;
     TechniqueGetInfo GetInfo;
     TechniqueBodyLoader BodyLoader;
-    TechniqueHeaderLoader HeaderLoader;
 } _generators[] = {
-    { "ao", technique_empty_get_info, ao_body_loader, technique_empty_header_loader },
-    { "path", path_get_info, path_body_loader, path_header_loader },
-    { "bi", bi_get_info, bi_body_loader, technique_empty_header_loader},
-    { "volpath", volpath_get_info, volpath_body_loader, volpath_header_loader },
-    { "debug", debug_get_info, debug_body_loader, technique_empty_header_loader },
-    { "ppm", ppm_get_info, ppm_body_loader, ppm_header_loader },
-    { "photonmapper", ppm_get_info, ppm_body_loader, ppm_header_loader },
-    { "wireframe", wireframe_get_info, wireframe_body_loader, wireframe_header_loader },
-    { "infobuffer", ib_get_info, ib_body_loader, ib_header_loader },
-    { "", nullptr, nullptr, nullptr }
+    { "ao", technique_empty_get_info, ao_body_loader },
+    { "path", path_get_info, path_body_loader },
+    { "volpath", volpath_get_info, volpath_body_loader },
+    { "debug", debug_get_info, debug_body_loader },
+    { "ppm", ppm_get_info, ppm_body_loader },
+    { "photonmapper", ppm_get_info, ppm_body_loader },
+    { "wireframe", wireframe_get_info, wireframe_body_loader },
+    { "infobuffer", ib_get_info, ib_body_loader },
+    { "", nullptr, nullptr }
 };
 
 static const TechniqueEntry* getTechniqueEntry(const std::string& name)
 {
     const std::string lower_name = to_lowercase(name);
-    for (size_t i = 0; _generators[i].HeaderLoader; ++i) {
+    for (size_t i = 0; _generators[i].BodyLoader; ++i) {
         if (_generators[i].Name == lower_name)
             return &_generators[i];
     }
@@ -575,27 +588,11 @@ std::string LoaderTechnique::generate(LoaderContext& ctx)
     return stream.str();
 }
 
-std::string LoaderTechnique::generateHeader(const LoaderContext& ctx, bool isRayGeneration)
-{
-    IG_UNUSED(isRayGeneration);
-
-    const auto* entry = getTechniqueEntry(ctx.TechniqueType);
-    if (!entry)
-        return {};
-
-    const auto technique = ctx.Scene.technique();
-
-    std::stringstream stream;
-    entry->HeaderLoader(stream, ctx.TechniqueType, technique, ctx);
-
-    return stream.str();
-}
-
 std::vector<std::string> LoaderTechnique::getAvailableTypes()
 {
     std::vector<std::string> array;
 
-    for (size_t i = 0; _generators[i].HeaderLoader; ++i)
+    for (size_t i = 0; _generators[i].BodyLoader; ++i)
         array.emplace_back(_generators[i].Name);
 
     std::sort(array.begin(), array.end());

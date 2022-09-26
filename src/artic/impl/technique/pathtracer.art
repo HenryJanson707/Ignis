@@ -15,23 +15,32 @@ static AOV_PATH_NORMAL = 1;
 static AOV_PATH_DIRECT = 2;
 static AOV_PATH_NEE    = 3;
 
-fn wrap_ptraypayload(payload: PTRayPayload) -> RayPayload {
-    let mut r : RayPayload;
-    r.components(0) = payload.mis;
-    r.components(1) = payload.contrib.r;
-    r.components(2) = payload.contrib.g;
-    r.components(3) = payload.contrib.b;
-    r.components(4) = payload.depth as f32;
-    r.components(5) = payload.eta;
-    r
+fn @write_ptraypayload(payload: RayPayload, pt: PTRayPayload) {
+    payload.store_vec4(0, make_vec4(pt.mis, pt.contrib.r, pt.contrib.g, pt.contrib.b));
+    payload.store_vec2(4, make_vec2(pt.depth as f32, pt.eta));
 }
 
-fn unwrap_ptraypayload(payload: RayPayload) = PTRayPayload {
-    mis     = payload.components(0),
-    contrib = make_color(payload.components(1), payload.components(2), payload.components(3), 1),
-    depth   = payload.components(4) as i32,
-    eta     = payload.components(5),
-};
+fn @unwrap_ptraypayload(payload: RayPayload) -> PTRayPayload {
+    let c0 = payload.load_vec4(0);
+    let c1 = payload.load_vec2(4);
+
+    PTRayPayload {
+        mis = c0.x,
+        contrib = make_color(c0.y, c0.z, c0.w, 1),
+        depth   = c1.x as i32,
+        eta     = c1.y
+    }
+}
+
+fn @init_ptraypayload(payload: RayPayload, _: i32, _:i32, _:i32) = write_ptraypayload(payload,
+    PTRayPayload {
+        mis = 0,
+        contrib = color_builtins::white,
+        depth   = 1,
+        eta     = 1
+    });
+
+fn @make_pt_emitter_payload_initializer() = EmitterPayloadInitializer{ init = init_ptraypayload, count = 6 };
 
 fn @make_path_renderer(max_path_len: i32, light_selector: LightSelector, aovs: AOVTable, buf: DeviceBuffer, camera_buf: DeviceBuffer, max_path_len_light: i32) -> Technique {
     let pdf_lightpick = if light_selector.count > 0 {1.0 / (light_selector.count as f32)} else {1.0};
@@ -308,6 +317,7 @@ fn @make_path_renderer(max_path_len: i32, light_selector: LightSelector, aovs: A
     fn @on_shadow( ctx: ShadingContext
                  , rnd: &mut RndState
                  , payload: RayPayload
+                 , _secondary_payloads: RayPayload
                  , mat: Material
                  ) -> ShadowRay {
         
@@ -652,18 +662,18 @@ fn @make_path_renderer(max_path_len: i32, light_selector: LightSelector, aovs: A
                 , rnd: &mut RndState
                 , payload: RayPayload
                 , mat: Material
-                 ) -> Option[(Ray, RayPayload)] {
+                 ) -> Option[Ray] {
         let pt = unwrap_ptraypayload(payload);
         let surf = ctx.surf;
         let ray = ctx.ray;
         let pixel = ctx.pixel;
         
-        if pt.depth + 1 > max_path_len {
-            return(Option[(Ray, RayPayload)]::None)
-        }
+        // if pt.depth + 1 > max_path_len {
+        //     return(Option[(Ray, RayPayload)]::None)
+        // }
 
         if pt.depth >= max_path_len {
-            return(Option[(Ray, RayPayload)]::None)
+            return(Option[Ray]::None)
         }
 
         let buf_pos = 16 * pixel * max_path_len;
@@ -679,7 +689,7 @@ fn @make_path_renderer(max_path_len: i32, light_selector: LightSelector, aovs: A
         if let Option[BsdfSample]::Some(mat_sample) = mat.bsdf.sample(rnd, wo, false) {
             let next_pdf = mat_sample.pdf;
             if next_pdf == 0.0{
-                return(Option[(Ray, RayPayload)]::None)
+                return(Option[Ray]::None)
             }
             let next_contri = color_mul(beta, mat_sample.color); //cos and pdf is already applied
 
@@ -696,18 +706,25 @@ fn @make_path_renderer(max_path_len: i32, light_selector: LightSelector, aovs: A
             }
 
             store_vertex_pdfRev(camera_buf, prev_buf_pos, correctedRevPDF);
-
-            make_option(
-                make_ray(surf.point, mat_sample.in_dir, offset, flt_max, ray_flag_bounce),
-                wrap_ptraypayload(PTRayPayload {
-                    mis     = next_pdf,
-                    contrib = next_contri,
-                    depth   = pt.depth + 1,
-                    eta     = pt.eta * mat_sample.eta
-                })
-            )
+            
+            write_ptraypayload(payload, PTRayPayload {
+                mis = next_pdf,
+                contrib = next_contri,
+                depth = pt.depth + 1,
+                eta = pt.eta * mat_sample.eta
+            });
+            make_option(make_ray(surf.point, mat_sample.in_dir, offset, flt_max, ray_flag_bounce))
+            // make_option(
+            //     make_ray(surf.point, mat_sample.in_dir, offset, flt_max, ray_flag_bounce),
+            //     wrap_ptraypayload(PTRayPayload {
+            //         mis     = next_pdf,
+            //         contrib = next_contri,
+            //         depth   = pt.depth + 1,
+            //         eta     = pt.eta * mat_sample.eta
+            //     })
+            // )
         } else {
-            Option[(Ray, RayPayload)]::None
+            Option[Ray]::None
         }
     }
 
@@ -718,5 +735,7 @@ fn @make_path_renderer(max_path_len: i32, light_selector: LightSelector, aovs: A
         on_bounce      = on_bounce,
         on_shadow_hit  = TechniqueNoShadowHitFunction,
         on_shadow_miss = TechniqueNoShadowMissFunction,
+        primary_payload_count   = 6,
+        secondary_payload_count = 0,
     }
 }
