@@ -42,7 +42,9 @@ static TechniqueInfo bi_get_info(const std::string&, const std::shared_ptr<Parse
 
 static void bi_body_loader(std::ostream& stream, const std::string&, const std::shared_ptr<Parser::Object>&, LoaderContext&)
 {
-    stream << "  let (film_width, film_height) = device.get_film_size();" << std::endl;
+    stream << " let work_info = get_work_info();" << std::endl;
+    stream << "  let film_width = work_info.width;" << std::endl;
+    stream << "  let film_height = work_info.height;" << std::endl;
     stream << "  let max_depth_light = 5;" << std::endl;
     stream << "  let buf_size = film_width * film_height * max_depth_light * 16;" << std::endl;
     stream << "  let buf = device.request_buffer(\"bi\", buf_size, 0);" << std::endl;
@@ -207,13 +209,13 @@ static TechniqueInfo path_get_info(const std::string&, const std::shared_ptr<Par
 
     // Check if we have a proper defined technique
     // It is totally fine to only define the type by other means then the scene config
-    if (technique) {
-        if (technique->property("aov_mis").getBool(false)) {
-            info.EnabledAOVs.emplace_back("Direct Weights");
-            info.EnabledAOVs.emplace_back("NEE Weights");
-            info.Variants[0].ShadowHandlingMode = ShadowHandlingMode::Advanced;
-        }
-    }
+    // if (technique) {
+    //     if (technique->property("aov_mis").getBool(false)) {
+    //         info.EnabledAOVs.emplace_back("Direct Weights");
+    //         info.EnabledAOVs.emplace_back("NEE Weights");
+    //         info.Variants[0].ShadowHandlingMode = ShadowHandlingMode::Advanced;
+    //     }
+    // }
 
     // auto variant_selector = [](uint32 i){
     //     return (i + 1) % 2; //TODO this is only true if we begin with zero
@@ -248,7 +250,9 @@ static TechniqueInfo path_get_info(const std::string&, const std::shared_ptr<Par
         stream << ctx.Lights->generateLightSelector("", tree);
 
 
-        stream << "  let (film_width, film_height) = device.get_film_size();" << std::endl;
+        stream << " let work_info = get_work_info();" << std::endl;
+        stream << "  let film_width = work_info.width;" << std::endl;
+        stream << "  let film_height = work_info.height;" << std::endl;
         stream << "  let spp = " << ctx.SamplesPerIteration << " : i32;" << std::endl;
         //The Buffer Size is far too big!!
         stream << "  let max_depth_light = 5;" << std::endl;
@@ -284,10 +288,12 @@ static TechniqueInfo path_get_info(const std::string&, const std::shared_ptr<Par
 
     info.Variants[1].OverrideCameraGenerator = light_camera;
     info.Variants[1].LockFramebuffer = true;
+    info.Variants[1].EmitterPayloadInitializer = "make_pt_emitter_payload_initializer";
     info.Variants[0].UsesLights = true;
+    info.Variants[0].EmitterPayloadInitializer = "make_pt_emitter_payload_initializer";
 
-    if (ctx.Denoiser.Enabled)
-        enable_ib(info, !ctx.Denoiser.OnlyFirstIteration);
+    // if (ctx.Denoiser.Enabled)
+    //     enable_ib(info, !ctx.Denoiser.OnlyFirstIteration);
 
     return info;
 }
@@ -297,7 +303,10 @@ static void path_body_loader(std::ostream& stream, const std::string&, const std
     if (handle_ib_body(stream, technique, ctx))
         return;
 
-    stream << "  let (film_width, film_height) = device.get_film_size();" << std::endl;
+    //stream << "  let (film_width, film_height) = device.get_film_size();" << std::endl;
+    stream << " let work_info = get_work_info();" << std::endl;
+    stream << "  let film_width = work_info.width;" << std::endl;
+    stream << "  let film_height = work_info.height;" << std::endl;
     stream << "  let max_depth_light = 5;" << std::endl;
     stream << "  let buf_size = film_width * film_height * max_depth_light * 16;" << std::endl;
     stream << "  let buf = device.request_buffer(\"bi\", buf_size, 0);" << std::endl;
@@ -415,7 +424,7 @@ static std::string ppm_before_iteration_generator(LoaderContext& ctx)
 
     stream << ShaderUtils::beginCallback(ctx) << std::endl
            << "  let scene_bbox = " << LoaderUtils::inlineSceneBBox(ctx) << ";" << std::endl
-           << "  ppm_handle_before_iteration(device, iter, " << ctx.CurrentTechniqueVariant << ", PPMPhotonCount, scene_bbox);" << std::endl
+           << "  ppm_handle_before_iteration(device, iter, " << ctx.CurrentTechniqueVariant << ", 1000000, scene_bbox);" << std::endl
            << ShaderUtils::endCallback() << std::endl;
 
     return stream.str();
@@ -438,7 +447,7 @@ static TechniqueInfo ppm_get_info(const std::string&, const std::shared_ptr<Pars
     info.Variants[1].CallbackGenerators[(int)CallbackType::BeforeIteration] = ppm_before_iteration_generator; // Construct query structure
 
     // The LT works independent of the framebuffer and requires a different work size
-    const int max_photons           = technique ? technique->property("photons").getInteger(1000000) : 1000000;
+    const int max_photons           = 1000000;
     info.Variants[0].OverrideWidth  = max_photons; // Photon count
     info.Variants[0].OverrideHeight = 1;
     info.Variants[0].OverrideSPI    = 1; // The light tracer variant is always just one spi (Could be improved in the future though)
@@ -501,7 +510,7 @@ static void ppm_body_loader(std::ostream& stream, const std::string&, const std:
     }
 
     stream << "  let scene_bbox  = " << LoaderUtils::inlineSceneBBox(ctx) << ";" << std::endl
-           << "  let light_cache = make_ppm_lightcache(device, PPMPhotonCount, scene_bbox);" << std::endl;
+           << "  let light_cache = make_ppm_lightcache(device, 1000000, scene_bbox);" << std::endl;
 
     if (is_lighttracer) {
         stream << "  let technique = make_ppm_light_renderer(" << max_depth << ", aovs, light_cache);" << std::endl;

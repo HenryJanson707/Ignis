@@ -342,13 +342,14 @@ fn @make_path_renderer(max_path_len: i32, light_selector: LightSelector, aovs: A
         let choice = if light_path_len == 0 {1} else {pick_light_id(rnd, light_path_len) + 1};
         //let s = if light_path_len >= 3 {3} else {0}; //important currently there is no choice here!!!!
         let s = choice;
+        //let s = if light_path_len >= 3 {3} else {0};
         //let s = 0;
         //let s = 2;
         //let s = 1;
         let t = pt.depth + 1;
 
 
-        let s_choice_pdf = light_path_len as f32;
+        let s_choice_pdf = light_path_len as f32; //this will be a problem if light_path_len is 0 TODO Fix
 
         if s == 1{
             let (light, light_select_pdf) = light_selector.sample(rnd, ctx.surf.point); //sollte eventuel wie im normalen pathtracer angepasst werden!!
@@ -372,9 +373,23 @@ fn @make_path_renderer(max_path_len: i32, light_selector: LightSelector, aovs: A
                 // if vis > flt_eps && light_sample.cos > flt_eps && pt.depth == 2{
                 if vis > flt_eps && light_sample.cos > flt_eps{
                     let conection_dir = vec3_sub(light_sample.pos, surf.point);
-                    let conection_ray = make_ray(surf.point, conection_dir, 0, flt_max, ray_flag_bounce);
+                    let conection_ray = make_ray(light_sample.pos, conection_dir, 0, flt_max, ray_flag_bounce);
 
-                    let pdf_em = light.pdf_emission(conection_ray, surf); //this is mostlikly wrong
+                    let light_normal = make_vec3(0.5369, -0.843659, 0.0000); //this is only temporary
+
+                    let light_surf = SurfaceElement{
+                        is_entering = true,
+                        point = light_sample.pos,
+                        face_normal = light_normal,
+                        inv_area = 1, //TODO this is wrong but should not matter 
+                        prim_coords = make_vec2(0,0),
+                        tex_coords = make_vec2(0,0),
+                        local = make_orthonormal_mat3x3(light_normal)
+                    };
+                    
+                    //we need to create the light surface here!!!!!!!
+
+                    let pdf_em = light.pdf_emission(conection_ray, light_surf); //this is mostlikly wrong
 
                     let cos_l = light_sample.cos;
                     let pdf_area = pdf_em.pdf_area; //pdf is Pos/Area
@@ -605,7 +620,7 @@ fn @make_path_renderer(max_path_len: i32, light_selector: LightSelector, aovs: A
                 let light   = mat.light;
 
                 let conection_dir = vec3_sub(surf.point, prev_pos);
-                let conection_ray = make_ray(prev_pos, conection_dir, 0, flt_max, ray_flag_bounce);
+                let conection_ray = make_ray(surf.point, conection_dir, 0, flt_max, ray_flag_bounce);
 
                 let pdf_em = light.pdf_emission(conection_ray, surf); //this is mostlikly wrong
 
