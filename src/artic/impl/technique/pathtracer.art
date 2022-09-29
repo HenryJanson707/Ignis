@@ -135,19 +135,19 @@ fn @make_path_renderer(max_path_len: i32, light_selector: LightSelector, aovs: A
 
         if pt.valid != 0 && t - 1 > 1{
             let ptPdfRev = pdfLightpick * light_pdf.pdf_area; //pdfLightOrigin //pdf is Pos/Area
-            ri *= ptPdfRev / pt.pdfFwd;
+            ri *= safe_div(ptPdfRev, pt.pdfFwd);
             sumRi += ri;
         }
         if ptMinus.valid != 0 && t - 2 > 1{
             let ptMinusPdfRev = pdfLightEmission(pt, ptMinus, light_pdf);
-            ri *= ptMinusPdfRev / ptMinus.pdfFwd;
+            ri *= safe_div(ptMinusPdfRev, ptMinus.pdfFwd);
             sumRi += ri;
         }
 
         //this could be wrong???
         let mut i = t-3;
         while i > 1{
-            ri *= load_vertex_pdfRev(camBuf, startCamBuff + 16 * i) / load_vertex_pdfFwd(camBuf, startCamBuff + 16 * i);
+            ri *= safe_div(load_vertex_pdfRev(camBuf, startCamBuff + 16 * i), load_vertex_pdfFwd(camBuf, startCamBuff + 16 * i));
             sumRi += ri;
             i -= 1;
         }
@@ -179,20 +179,20 @@ fn @make_path_renderer(max_path_len: i32, light_selector: LightSelector, aovs: A
 
         if pt.valid != 0 && t - 1 > 1{
             let ptPdfRev = pdfLightDirect(qs, pt, light_pdf); //this is most likly wrong 
-            ri *= ptPdfRev / pt.pdfFwd;
+            ri *= safe_div(ptPdfRev, pt.pdfFwd);
             sumRi += ri;
         }
 
         if ptMinus.valid != 0 && t - 2 > 1{
             let ptMinusPdfRev = pdfConectionGround(pt, qs, ptMinus, mat);
-            ri *= ptMinusPdfRev / ptMinus.pdfFwd;
+            ri *= safe_div(ptMinusPdfRev, ptMinus.pdfFwd);
             sumRi += ri;
         }
 
         //this could be wrong???
         let mut i = t-3;
         while i > 1{
-            ri *= load_vertex_pdfRev(camBuf, startCamBuff + 16 * i) / load_vertex_pdfFwd(camBuf, startCamBuff + 16 * i);
+            ri *= safe_div(load_vertex_pdfRev(camBuf, startCamBuff + 16 * i), load_vertex_pdfFwd(camBuf, startCamBuff + 16 * i));
             sumRi += ri;
             i -= 1;
         }
@@ -208,7 +208,7 @@ fn @make_path_renderer(max_path_len: i32, light_selector: LightSelector, aovs: A
         ri = 1.0;
 
         let qsPdfRev = pdfConectionGround(pt, ptMinus, qs, mat);
-        ri *= qsPdfRev / qs.pdfFwd;
+        ri *= safe_div(qsPdfRev, qs.pdfFwd);
         sumRi += ri;
 
         return(1.0 / (1.0 + sumRi))
@@ -229,12 +229,12 @@ fn @make_path_renderer(max_path_len: i32, light_selector: LightSelector, aovs: A
 
         if pt.valid != 0 && t - 1 > 1{
             let ptPdfRev = pdfConectionGround(qs, qsMinus, pt, mat); //this is most likly wrong 
-            ri *= ptPdfRev / pt.pdfFwd;
+            ri *= safe_div(ptPdfRev, pt.pdfFwd);
             sumRi += ri;
         }
         if ptMinus.valid != 0 && t - 2 > 1{
             let ptMinusPdfRev = pdfConectionGround(pt, qs, ptMinus, mat);
-            ri *= ptMinusPdfRev / ptMinus.pdfFwd;
+            ri *= safe_div(ptMinusPdfRev, ptMinus.pdfFwd);
             sumRi += ri;
         }
 
@@ -242,7 +242,7 @@ fn @make_path_renderer(max_path_len: i32, light_selector: LightSelector, aovs: A
         let mut i = t-3;
         //this could be wrong???
         while i > 1{
-            ri *= load_vertex_pdfRev(camBuf, startCamBuff + 16 * i) / load_vertex_pdfFwd(camBuf, startCamBuff + 16 * i); //Extra check here
+            ri *= safe_div(load_vertex_pdfRev(camBuf, startCamBuff + 16 * i), load_vertex_pdfFwd(camBuf, startCamBuff + 16 * i)); //Extra check here
             sumRi += ri;
             i -= 1;
         }
@@ -258,12 +258,12 @@ fn @make_path_renderer(max_path_len: i32, light_selector: LightSelector, aovs: A
         ri = 1.0;
         
         let qsPdfRev = pdfConectionGround(pt, ptMinus, qs, mat);
-        ri *= qsPdfRev / qs.pdfFwd;
+        ri *= safe_div(qsPdfRev, qs.pdfFwd);
         sumRi += ri;
         
 
         let qsMinusPdfRev = pdfConectionGround(qs, pt, qsMinus, mat);
-        ri *= qsMinusPdfRev / qsMinus.pdfFwd;
+        ri *= safe_div(qsMinusPdfRev, qsMinus.pdfFwd);
         sumRi += ri;
         
         //this is only for debugging
@@ -276,7 +276,7 @@ fn @make_path_renderer(max_path_len: i32, light_selector: LightSelector, aovs: A
         //this could be wrong???
         //the NaN is here!!!!!!!!
         while i > -1{
-            ri *= load_vertex_pdfRev(lightBuf, startLightBuf + 16 * i) / load_vertex_pdfFwd(lightBuf, startLightBuf + 16 * i); //Extra check here
+            ri *= safe_div(load_vertex_pdfRev(lightBuf, startLightBuf + 16 * i), load_vertex_pdfFwd(lightBuf, startLightBuf + 16 * i)); //Extra check here
             sumRi += ri;
             i -= 1;
         }
@@ -349,7 +349,7 @@ fn @make_path_renderer(max_path_len: i32, light_selector: LightSelector, aovs: A
         let t = pt.depth + 1;
 
 
-        let s_choice_pdf = light_path_len as f32; //this will be a problem if light_path_len is 0 TODO Fix
+        let s_choice_pdf = if light_path_len > 0 {light_path_len as f32} else {1}; //this will be a problem if light_path_len is 0 TODO Fix
 
         if s == 1{
             let (light, light_select_pdf) = light_selector.sample(rnd, ctx.surf.point); //sollte eventuel wie im normalen pathtracer angepasst werden!!
@@ -432,7 +432,7 @@ fn @make_path_renderer(max_path_len: i32, light_selector: LightSelector, aovs: A
                     let mis_choice = mis * s_choice_pdf;
 
                     let mis_contri = color_mulf(contri, mis_choice);
-
+                    
                     return(make_simple_shadow_ray(
                         make_ray(surf.point, light_dir, offset, 1 - offset, ray_flag_light),
                         mis_contri
@@ -493,55 +493,25 @@ fn @make_path_renderer(max_path_len: i32, light_selector: LightSelector, aovs: A
 
                 let mis_contri = color_mulf(contri, mis_choice);
 
-                // if contri.r > 100 && pt.depth == 1{
-                //     print_string("\n");
-                //     print_i32(t);
-                //     print_string("\n");
-                //     print_i32(s);
-                //     print_string("\n");
-                //     print_i32(light_path_len);
-                //     print_string("\n");
-                //     print_f32(mis_contri.r);
-                //     print_string("\n");
-                //     print_f32(mis);
-                //     print_string("\n");
-                //     print_f32(conection.r);
-                //     print_string("\n");
-                //     print_f32(light_dist2);
-                //     print_string("\n");
-                // }
-            
-                // if(pixel == 125864){
-                //     print_string("Camera");
-                //     // print_string("\n");
-                //     // print_f32(light_dist);
-                //     // print_string("\n");
-                //     // print_f32(geom_factor);
-                //     // print_string("\n");
-                //     // print_f32(light_bsdf.r);print_string(",");print_f32(light_bsdf.g);print_string(",");print_f32(light_bsdf.b);print_string(",");
-                //     // print_string("\n");
-                //     // print_f32(conection.r);print_string(",");print_f32(conection.g);print_string(",");print_f32(conection.b);print_string(",");
-                //     print_string("\n");
-                //     print_f32(light_pos.x);print_string(",");print_f32(light_pos.y);print_string(",");print_f32(light_pos.z);print_string(",");
-                //     // print_string("\n");
-                //     // print_f32(surf.point.x);print_string(",");print_f32(surf.point.y);print_string(",");print_f32(surf.point.z);print_string(",");
-                //     print_string("\n");
-                //     print_f32(light_normal.x);print_string(",");print_f32(light_normal.y);;print_string(",");print_f32(light_normal.z);;print_string(",");
-                //     // print_string("\n");
-                //     // print_f32(surf.face_normal.x);print_string(",");print_f32(surf.face_normal.y);;print_string(",");print_f32(surf.face_normal.z);;print_string(",");
-                //     print_string("\n");
-                //     print_f32(light_beta.r);print_string(",");print_f32(light_beta.g);print_string(",");print_f32(light_beta.b);print_string(",");
-                //     print_string("\n");
-                //     print_f32(light_wi.x);print_string(",");print_f32(light_wi.y);print_string(",");print_f32(light_wi.z);print_string(",");
-                //     print_string("\n");
-                //     print_f32(light_wo.x);print_string(",");print_f32(light_wo.y);print_string(",");print_f32(light_wo.z);print_string(",");
-                //     // print_string("\n");
-                //     // print_f32(contri.r);print_string(",");print_f32(contri.g);print_string(",");print_f32(contri.b);print_string(",");
-                //     print_string("\n");
-                //     print_flush();
-                // }
 
                 //return(Option[(Ray, Color)]::None)
+                // if math_builtins::isnan(mis_contri.r){
+                //     print_string("\n");
+                //     print_string("Help");
+                //     print_string(" ");
+                //     print_f32(conection.r);
+                //     print_string(" ");
+                //     print_f32(camera_beta.r);
+                //     print_string(" ");
+                //     print_f32(light_beta.r);
+                //     print_string(" ");
+                //     print_f32(contri.r);
+                //     print_string(" ");
+                //     print_f32(mis);
+                //     print_string(" ");
+                //     print_f32(s_choice_pdf);
+                //     print_string("\n");
+                // }
                 return(make_simple_shadow_ray(
                     make_ray(surf.point, light_dir, offset, 1 - offset, ray_flag_light),
                     mis_contri
