@@ -611,6 +611,15 @@ fn @make_path_renderer(max_path_len: i32, light_selector: LightSelector, aovs: A
         Option[Color]::None
     }
 
+    fn @on_shadow_hit( ray: Ray
+        , pixel: i32
+        , shader: MaterialShader
+        , payload: RayPayload
+        , color: Color) -> Option[Color] {
+        make_option(color)
+    }
+
+
     fn @on_miss( ray: Ray
                , pixel: i32
                , payload: RayPayload) -> Option[Color] {
@@ -719,7 +728,7 @@ fn @make_path_renderer(max_path_len: i32, light_selector: LightSelector, aovs: A
         on_shadow      = on_shadow,
         on_bounce      = on_bounce,
         on_shadow_hit  = TechniqueNoShadowHitFunction,
-        on_shadow_miss = TechniqueNoShadowMissFunction,
+        on_shadow_miss = on_shadow_hit,
         primary_payload_count   = 6,
         secondary_payload_count = 0,
     }

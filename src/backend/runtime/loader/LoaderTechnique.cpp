@@ -291,6 +291,7 @@ static TechniqueInfo path_get_info(const std::string&, const std::shared_ptr<Par
     info.Variants[1].EmitterPayloadInitializer = "make_pt_emitter_payload_initializer";
     info.Variants[0].UsesLights = true;
     info.Variants[0].EmitterPayloadInitializer = "make_pt_emitter_payload_initializer";
+    info.Variants[0].ShadowHandlingMode = ShadowHandlingMode::AdvancedWithMaterials;
 
     // if (ctx.Denoiser.Enabled)
     //     enable_ib(info, !ctx.Denoiser.OnlyFirstIteration);
