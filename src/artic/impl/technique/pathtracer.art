@@ -4,6 +4,24 @@ fn @russian_roulette(c: Color, clamp: f32) = clampf(2 * color_luminance(c), 0.05
 // Russian roulette used in pbrt v4
 fn @russian_roulette_pbrt(c: Color, clamp: f32) = clampf(color_max_component(c), 0.05, clamp);
 
+struct SecondaryPayload{
+    s: i32,
+    ri: f32,
+}
+
+fn @write_secondarypayload(payload: RayPayload, pt: SecondaryPayload){
+    payload.store_vec2(0, make_vec2(pt.s as f32, pt.ri));
+}
+
+fn @unwrap_secondarypayload(payload: RayPayload) -> SecondaryPayload {
+    let c0 = payload.load_vec2(0);
+
+    SecondaryPayload {
+        s = c0.x as i32, //is this realy okay???
+        ri = c0.y,
+    }
+}
+
 struct PTRayPayload {
     mis:     f32,
     contrib: Color,
@@ -281,21 +299,6 @@ fn @make_path_renderer(max_path_len: i32, light_selector: LightSelector, aovs: A
             i -= 1;
         }
         
-        // if contri > 100 && t == 2 && sumRi < 0.001{
-        //     print_string("\n");
-        //     print_i32(t);
-        //     print_string("\n");
-        //     print_i32(s);
-        //     print_string("\n");
-        //     print_f32(qsPdfRev);
-        //     print_string("\n");
-        //     pdfConectionGroundPrint(pt, ptMinus, qs, mat);
-        //     print_string("\n");
-        //     print_f32(qs.pdfFwd);
-        //     print_string("\n");
-        //     print_f32(sumRi);
-        //     print_string("\n");
-        // }
 
         if contri > 1 && qsPdfRev < 0.01{
             sumRi = 1000000000.0;
@@ -317,7 +320,7 @@ fn @make_path_renderer(max_path_len: i32, light_selector: LightSelector, aovs: A
     fn @on_shadow( ctx: ShadingContext
                  , rnd: &mut RndState
                  , payload: RayPayload
-                 , _secondary_payloads: RayPayload
+                 , secondary_payloads: RayPayload
                  , mat: Material
                  ) -> ShadowRay {
         
@@ -433,6 +436,10 @@ fn @make_path_renderer(max_path_len: i32, light_selector: LightSelector, aovs: A
 
                     let mis_contri = color_mulf(contri, mis_choice);
                     
+                    write_secondarypayload(secondary_payloads, SecondaryPayload {
+                        s=s,
+                        ri=0.0,
+                    });
                     return(make_simple_shadow_ray(
                         make_ray(surf.point, light_dir, offset, 1 - offset, ray_flag_light),
                         mis_contri
@@ -512,9 +519,14 @@ fn @make_path_renderer(max_path_len: i32, light_selector: LightSelector, aovs: A
                 //     print_f32(s_choice_pdf);
                 //     print_string("\n");
                 // }
-                return(make_simple_shadow_ray(
+                write_secondarypayload(secondary_payloads, SecondaryPayload {
+                    s=s,
+                    ri=0.0,
+                });
+                return(make_advanced_shadow_ray(
                     make_ray(surf.point, light_dir, offset, 1 - offset, ray_flag_light),
-                    mis_contri
+                    mis_contri,
+                    light_vertex.mat
                 ))
             }else{
                 ShadowRay::None
@@ -616,7 +628,9 @@ fn @make_path_renderer(max_path_len: i32, light_selector: LightSelector, aovs: A
         , shader: MaterialShader
         , payload: RayPayload
         , color: Color) -> Option[Color] {
-        make_option(color)
+            let secondary = unwrap_secondarypayload(payload);
+            print_i32(secondary.s);
+            make_option(color)
     }
 
 
@@ -730,6 +744,6 @@ fn @make_path_renderer(max_path_len: i32, light_selector: LightSelector, aovs: A
         on_shadow_hit  = TechniqueNoShadowHitFunction,
         on_shadow_miss = on_shadow_hit,
         primary_payload_count   = 6,
-        secondary_payload_count = 0,
+        secondary_payload_count = 1,
     }
 }
