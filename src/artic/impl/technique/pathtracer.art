@@ -4,23 +4,32 @@ fn @russian_roulette(c: Color, clamp: f32) = clampf(2 * color_luminance(c), 0.05
 // Russian roulette used in pbrt v4
 fn @russian_roulette_pbrt(c: Color, clamp: f32) = clampf(color_max_component(c), 0.05, clamp);
 
+//TODO this can be done better
 struct SecondaryPayload{
     s: i32,
     t: i32,
-    ri: f32,
+    ri: Vec2,
+    light_wo: Vec3,
+    camera_pos: Vec3,
 }
-
+//TODO this can be done better
 fn @write_secondarypayload(payload: RayPayload, pt: SecondaryPayload){
-    payload.store_vec2(0, make_vec3(pt.s as f32, pt.t as f32, pt.ri));
+    payload.store_vec4(0, make_vec4(pt.s as f32, pt.t as f32, pt.ri.x, pt.ri.y));
+    payload.store_vec3(4, pt.light_wo);
+    payload.store_vec3(8, pt.camera_pos);
 }
-
+//TODO this can be done better
 fn @unwrap_secondarypayload(payload: RayPayload) -> SecondaryPayload {
-    let c0 = payload.load_vec2(0);
+    let c0 = payload.load_vec4(0);
+    let c1 = payload.load_vec3(4);
+    let c2 = payload.load_vec3(8);
 
     SecondaryPayload {
         s = c0.x as i32, //is this realy okay???
         t = c0.y as i32,
-        ri = c0.z,
+        ri = make_vec2(c0.z, c0.w),
+        light_wo = c1,
+        camera_pos = c2,
     }
 }
 
@@ -234,8 +243,34 @@ fn @make_path_renderer(max_path_len: i32, light_selector: LightSelector, aovs: A
         return(1.0 / (1.0 + sumRi))
     }
 
-    //wrong because we need both materials!!
-    fn MISWeight(camBuf: DeviceBuffer, lightBuf: DeviceBuffer, pixel:i32, s:i32, t:i32, mat: Material, contri: f32) -> f32{ //the contri is only
+    //TODO not all of the varibles are needed make it better
+    fn MISWeightCamera(camBuf: DeviceBuffer, lightBuf: DeviceBuffer, pixel:i32, s:i32, t:i32, mat: Material) -> Vec2{
+        let startCamBuff = 16 * pixel * max_path_len;
+        let startLightBuf = 16 * pixel * max_path_len_light;
+        // let current_buf_pos = buf_pos + pt.depth * 16;
+        let mut qs = load_vertex(lightBuf, startLightBuf + 16 * (s-1));
+        let mut pt = if t > 0 {load_vertex(camBuf, startCamBuff + 16 * (t-1))} else {make_empty_Vertex()};
+        let mut qsMinus = load_vertex(lightBuf, startLightBuf + 16 * (s-2));
+        let mut ptMinus = if t > 1 {load_vertex(camBuf, startCamBuff + 16 * (t-2))} else {make_empty_Vertex()};
+
+        let mut ri1 : f32 = 0.0;
+
+        //this is the camera Part
+        if ptMinus.valid != 0 && t - 2 > 1{
+            let ptMinusPdfRev = pdfConectionGround(pt, qs, ptMinus, mat);
+            ri1 = safe_div(ptMinusPdfRev, ptMinus.pdfFwd);
+        }
+
+
+        let qsPdfRev = pdfConectionGround(pt, ptMinus, qs, mat);
+        let ri2 : f32 = safe_div(qsPdfRev, qs.pdfFwd);
+
+        return (make_vec2(ri1, ri2))
+    }
+
+
+    //TODO not all of the varibles are needed make it better
+    fn MISWeight(camBuf: DeviceBuffer, lightBuf: DeviceBuffer, pixel:i32, s:i32, t:i32, mat: Material, contri: f32, current_ri: Vec2) -> f32{ //the contri is only
         let startCamBuff = 16 * pixel * max_path_len;
         let startLightBuf = 16 * pixel * max_path_len_light;
         // let current_buf_pos = buf_pos + pt.depth * 16;
@@ -254,11 +289,9 @@ fn @make_path_renderer(max_path_len: i32, light_selector: LightSelector, aovs: A
             sumRi += ri;
         }
         if ptMinus.valid != 0 && t - 2 > 1{
-            let ptMinusPdfRev = pdfConectionGround(pt, qs, ptMinus, mat);
-            ri *= safe_div(ptMinusPdfRev, ptMinus.pdfFwd);
+            ri *= current_ri.x;
             sumRi += ri;
         }
-
 
         let mut i = t-3;
         //this could be wrong???
@@ -278,8 +311,7 @@ fn @make_path_renderer(max_path_len: i32, light_selector: LightSelector, aovs: A
 
         ri = 1.0;
         
-        let qsPdfRev = pdfConectionGround(pt, ptMinus, qs, mat);
-        ri *= safe_div(qsPdfRev, qs.pdfFwd);
+        ri *= current_ri.y;
         sumRi += ri;
         
 
@@ -303,9 +335,10 @@ fn @make_path_renderer(max_path_len: i32, light_selector: LightSelector, aovs: A
         }
         
 
-        if contri > 1 && qsPdfRev < 0.01{
-            sumRi = 1000000000.0;
-        }
+        //TODO we need to finde a better way
+        // if contri > 1 && qsPdfRev < 0.01{
+        //     sumRi = 1000000000.0;
+        // }
 
         // for i in range_step(t-3, -1, -1){
         //     //this just seems wrong 
@@ -317,7 +350,9 @@ fn @make_path_renderer(max_path_len: i32, light_selector: LightSelector, aovs: A
         // }
 
         return(1.0 / (1.0 + sumRi))
-    }    
+    }
+    
+    
 
 
     fn @on_shadow( ctx: ShadingContext
@@ -442,7 +477,10 @@ fn @make_path_renderer(max_path_len: i32, light_selector: LightSelector, aovs: A
                     write_secondarypayload(secondary_payloads, SecondaryPayload {
                         s=s,
                         t=t,
-                        ri=0.0,
+                        ri=make_vec2(0.0, 0.0),
+                        light_wo=make_vec3(0.0, 0.0, 0.0),
+                        camera_pos=make_vec3(0.0, 0.0, 0.0),
+
                     });
                     return(make_simple_shadow_ray(
                         make_ray(surf.point, light_dir, offset, 1 - offset, ray_flag_light),
@@ -459,8 +497,10 @@ fn @make_path_renderer(max_path_len: i32, light_selector: LightSelector, aovs: A
 
             let light_buf_pos_corrected = light_buf_pos + 16 * (s - 1);
 
+            //TODO importently not all values here are needed delete the rest, aspschly for the Light ones
             let light_vertex = load_vertex(buf, light_buf_pos_corrected);
             //The current size of one data point is 16 bytes (valid: i32 (0, 1): 0, material: i32: 1, pdfFwd: f32 : 2, pdfRev: f32: 3, pos: vec3 : 4, normal: vec3 : 7, beta: vec3 : 10, wo: vec3 : 13)
+            //TODO importently not all values here are needed delete the rest, aspschly for the Light ones
             let light_pos = light_vertex.pos;
             let light_normal = light_vertex.normal;
             let light_beta = light_vertex.beta;
@@ -489,48 +529,34 @@ fn @make_path_renderer(max_path_len: i32, light_selector: LightSelector, aovs: A
                     local = make_orthonormal_mat3x3(light_normal)
                 };
 
-                let light_mat = make_diffuse_bsdf(light_surf, make_color(0.8,0.8,0.8,1));
-
-                let geom_factor = 1 / light_dist2; //the two cos factors should be in in the two bsdf calculations
                 let camera_bsdf = mat.bsdf.eval(camera_wi, camera_wo);
+                let importance = color_mulf(color_mul(camera_bsdf, camera_beta),s_choice_pdf); //we add s_choice_pdf here because other wise we would need more memory 
+                let current_ri = MISWeightCamera(camera_buf, buf, pixel, s, t, mat);
 
-                let light_bsdf = light_mat.eval(light_wo, light_wi); 
-                let conection = color_mulf(color_mul(camera_bsdf, light_bsdf), geom_factor);
-                let contri = color_mul(color_mul(conection, camera_beta), light_beta);
+                // let light_mat = make_diffuse_bsdf(light_surf, make_color(0.8,0.8,0.8,1));
 
-                let mis = MISWeight(camera_buf, buf, pixel, s, t, mat, contri.r); //s_choice_pdf is needed because we need to acount for chocing a technike 
-                let mis_choice = mis * s_choice_pdf;
+                // let geom_factor = 1 / light_dist2; //the two cos factors should be in in the two bsdf calculations
+                // let camera_bsdf = mat.bsdf.eval(camera_wi, camera_wo);
 
+                // let light_bsdf = light_mat.eval(light_wo, light_wi); 
+                // let conection = color_mulf(color_mul(camera_bsdf, light_bsdf), geom_factor);
+                // let contri = color_mul(color_mul(conection, camera_beta), light_beta);
 
-                let mis_contri = color_mulf(contri, mis_choice);
+                // let current_ri = MISWeightCamera(camera_buf, buf, pixel, s, t, mat, contri.r); //s_choice_pdf is needed because we need to acount for chocing a technike 
+                // let mis_choice = mis * s_choice_pdf;
 
+                // let mis_contri = color_mulf(contri, mis_choice);
 
-                //return(Option[(Ray, Color)]::None)
-                // if math_builtins::isnan(mis_contri.r){
-                //     print_string("\n");
-                //     print_string("Help");
-                //     print_string(" ");
-                //     print_f32(conection.r);
-                //     print_string(" ");
-                //     print_f32(camera_beta.r);
-                //     print_string(" ");
-                //     print_f32(light_beta.r);
-                //     print_string(" ");
-                //     print_f32(contri.r);
-                //     print_string(" ");
-                //     print_f32(mis);
-                //     print_string(" ");
-                //     print_f32(s_choice_pdf);
-                //     print_string("\n");
-                // }
                 write_secondarypayload(secondary_payloads, SecondaryPayload {
                     s=s,
                     t=t,
-                    ri=0.0,
+                    ri=current_ri,
+                    light_wo=light_wo,
+                    camera_pos=camera_pos,
                 });
                 return(make_advanced_shadow_ray(
                     make_ray(surf.point, light_dir, offset, 1 - offset, ray_flag_light),
-                    mis_contri,
+                    importance,
                     light_vertex.mat
                 ))
             }else{
@@ -547,27 +573,44 @@ fn @make_path_renderer(max_path_len: i32, light_selector: LightSelector, aovs: A
         , payload: RayPayload
         , color: Color) -> Option[Color] {
             let secondary = unwrap_secondarypayload(payload);
+            if secondary.s > 1{
 
-            let light_buf_pos  = 16 * pixel * max_path_len_light;
-            let light_buf_pos_corrected = light_buf_pos + 16 * (s - 1);
+                let light_buf_pos  = 16 * pixel * max_path_len_light;
+                let light_buf_pos_corrected = light_buf_pos + 16 * (secondary.s - 1);
 
-            let light_vertex = load_vertex(buf, light_buf_pos_corrected);
+                let light_vertex = load_vertex(buf, light_buf_pos_corrected);
 
-            let light_pos = light_vertex.pos;
-            let light_normal = light_vertex.normal;
-            let light_beta = light_vertex.beta;
-            let light_wi = light_vertex.wo;
+                let light_pos = light_vertex.pos;
+                let light_normal = light_vertex.normal;
+                let light_beta = light_vertex.beta;
+                let light_wi = light_vertex.wo;
 
-            let light_dir = vec3_sub(light_pos, camera_pos);
-            let light_dist = vec3_len(light_dir);
-            let light_dist2 = light_dist * light_dist;
+                let light_dir = vec3_sub(light_pos, secondary.camera_pos);
+                let light_dist = vec3_len(light_dir);
+                let light_dist2 = light_dist * light_dist;
 
-            let light_mat;...
+                let mat = 1.0;
 
-            let light_bsdf = light_mat.eval(light_wo, light_wi); 
-            
-            print_i32(secondary.s);
-            make_option(color)
+                let light_bsdf = mat.eval(secondary.light_wo, light_wi); 
+
+                let geom_factor = 1 / light_dist2; //the two cos factors should be in in the two bsdf calculations
+
+                let conection = color_mulf(light_bsdf, geom_factor);
+                let contri = color_mul(color_mul(conection, color), light_beta);
+                // let light_bsdf = light_mat.eval(light_wo, light_wi); 
+                // let conection = color_mulf(color_mul(camera_bsdf, light_bsdf), geom_factor);
+                // let contri = color_mul(color_mul(conection, camera_beta), light_beta);
+
+                let mis = MISWeight(camera_buf, buf, pixel, secondary.s, secondary.t, mat, contri.r, secondary.ri); //the solution could change here because we added s_choice already
+
+                //let mis_choice = mis * s_choice_pdf; s_choice is already in color!!!
+
+                let mis_contri = color_mulf(contri, mis);
+                
+                make_option(color)
+            }else{
+                make_option(color)
+            }
 
     }
 
@@ -762,7 +805,7 @@ fn @make_path_renderer(max_path_len: i32, light_selector: LightSelector, aovs: A
             Option[Ray]::None
         }
     }
-
+    //the Secondary_payload could be smaller
     Technique {
         on_hit         = on_hit,
         on_miss        = on_miss,
@@ -771,6 +814,6 @@ fn @make_path_renderer(max_path_len: i32, light_selector: LightSelector, aovs: A
         on_shadow_hit  = TechniqueNoShadowHitFunction,
         on_shadow_miss = on_shadow_hit,
         primary_payload_count   = 6,
-        secondary_payload_count = 1,
+        secondary_payload_count = 12,
     }
 }
