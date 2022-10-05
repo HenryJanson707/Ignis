@@ -574,11 +574,14 @@ fn @make_path_renderer(max_path_len: i32, light_selector: LightSelector, aovs: A
         , color: Color) -> Option[Color] {
             let secondary = unwrap_secondarypayload(payload);
             if secondary.s > 1{
-
                 let light_buf_pos  = 16 * pixel * max_path_len_light;
                 let light_buf_pos_corrected = light_buf_pos + 16 * (secondary.s - 1);
 
                 let light_vertex = load_vertex(buf, light_buf_pos_corrected);
+                //TODO wo is wrong????
+                let ray = make_ray(light_vertex.pos, light_vertex.wo, offset, flt_max, ray_flag_bounce); //TODO test this!!!!!
+                let ctx = make_miss_shading_context(pixel, ray);
+                let mat = shader(ctx);
 
                 let light_pos = light_vertex.pos;
                 let light_normal = light_vertex.normal;
@@ -589,9 +592,7 @@ fn @make_path_renderer(max_path_len: i32, light_selector: LightSelector, aovs: A
                 let light_dist = vec3_len(light_dir);
                 let light_dist2 = light_dist * light_dist;
 
-                let mat = 1.0;
-
-                let light_bsdf = mat.eval(secondary.light_wo, light_wi); 
+                let light_bsdf = mat.bsdf.eval(secondary.light_wo, light_wi); 
 
                 let geom_factor = 1 / light_dist2; //the two cos factors should be in in the two bsdf calculations
 
