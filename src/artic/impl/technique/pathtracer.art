@@ -6,11 +6,12 @@ fn @russian_roulette_pbrt(c: Color, clamp: f32) = clampf(color_max_component(c),
 
 struct SecondaryPayload{
     s: i32,
+    t: i32,
     ri: f32,
 }
 
 fn @write_secondarypayload(payload: RayPayload, pt: SecondaryPayload){
-    payload.store_vec2(0, make_vec2(pt.s as f32, pt.ri));
+    payload.store_vec2(0, make_vec3(pt.s as f32, pt.t as f32, pt.ri));
 }
 
 fn @unwrap_secondarypayload(payload: RayPayload) -> SecondaryPayload {
@@ -18,7 +19,8 @@ fn @unwrap_secondarypayload(payload: RayPayload) -> SecondaryPayload {
 
     SecondaryPayload {
         s = c0.x as i32, //is this realy okay???
-        ri = c0.y,
+        t = c0.y as i32,
+        ri = c0.z,
     }
 }
 
@@ -231,6 +233,7 @@ fn @make_path_renderer(max_path_len: i32, light_selector: LightSelector, aovs: A
 
         return(1.0 / (1.0 + sumRi))
     }
+
     //wrong because we need both materials!!
     fn MISWeight(camBuf: DeviceBuffer, lightBuf: DeviceBuffer, pixel:i32, s:i32, t:i32, mat: Material, contri: f32) -> f32{ //the contri is only
         let startCamBuff = 16 * pixel * max_path_len;
@@ -438,6 +441,7 @@ fn @make_path_renderer(max_path_len: i32, light_selector: LightSelector, aovs: A
                     
                     write_secondarypayload(secondary_payloads, SecondaryPayload {
                         s=s,
+                        t=t,
                         ri=0.0,
                     });
                     return(make_simple_shadow_ray(
@@ -521,6 +525,7 @@ fn @make_path_renderer(max_path_len: i32, light_selector: LightSelector, aovs: A
                 // }
                 write_secondarypayload(secondary_payloads, SecondaryPayload {
                     s=s,
+                    t=t,
                     ri=0.0,
                 });
                 return(make_advanced_shadow_ray(
@@ -535,6 +540,38 @@ fn @make_path_renderer(max_path_len: i32, light_selector: LightSelector, aovs: A
             ShadowRay::None
         }
     }
+
+    fn @on_shadow_hit( ray: Ray
+        , pixel: i32
+        , shader: MaterialShader
+        , payload: RayPayload
+        , color: Color) -> Option[Color] {
+            let secondary = unwrap_secondarypayload(payload);
+
+            let light_buf_pos  = 16 * pixel * max_path_len_light;
+            let light_buf_pos_corrected = light_buf_pos + 16 * (s - 1);
+
+            let light_vertex = load_vertex(buf, light_buf_pos_corrected);
+
+            let light_pos = light_vertex.pos;
+            let light_normal = light_vertex.normal;
+            let light_beta = light_vertex.beta;
+            let light_wi = light_vertex.wo;
+
+            let light_dir = vec3_sub(light_pos, camera_pos);
+            let light_dist = vec3_len(light_dir);
+            let light_dist2 = light_dist * light_dist;
+
+            let light_mat;...
+
+            let light_bsdf = light_mat.eval(light_wo, light_wi); 
+            
+            print_i32(secondary.s);
+            make_option(color)
+
+    }
+
+
 
     fn @on_hit( ctx: ShadingContext
               , payload: RayPayload
@@ -621,16 +658,6 @@ fn @make_path_renderer(max_path_len: i32, light_selector: LightSelector, aovs: A
             }
         }
         Option[Color]::None
-    }
-
-    fn @on_shadow_hit( ray: Ray
-        , pixel: i32
-        , shader: MaterialShader
-        , payload: RayPayload
-        , color: Color) -> Option[Color] {
-            let secondary = unwrap_secondarypayload(payload);
-            print_i32(secondary.s);
-            make_option(color)
     }
 
 
