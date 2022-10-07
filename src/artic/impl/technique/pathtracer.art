@@ -567,7 +567,32 @@ fn @make_path_renderer(max_path_len: i32, light_selector: LightSelector, aovs: A
         }
     }
 
-    fn @on_shadow_hit( ray: Ray
+    fn @make_miss_contri_shadingContext(pixel : i32, hitPLight : Vec3, hitPCam : Vec3, normal : Vec3) -> ShadingContext{
+        let dir = vec3_sub(hitPLight, hitPCam);
+        let ray = make_ray(hitPLight, dir, offset, flt_max, ray_flag_light);
+        let hit = make_hit(0, 0, vec3_dist(hitPLight, hitPCam), make_vec2(0,0));
+        let uvw = make_vec3(0,0,0);
+        let surf = SurfaceElement{
+            is_entering = false,
+            point = hitPLight,
+            face_normal = normal,
+            inv_area = 0.0,
+            prim_coords = make_vec2(0,0),
+            tex_coords = make_vec2(0,0),
+            local = make_orthonormal_mat3x3(normal)
+        };
+        ShadingContext{
+            entity_id = 0,
+            pixel = pixel,
+            ray = ray,
+            hit = hit,
+            surf = surf,
+            uvw = uvw
+        }
+    }
+
+
+    fn @on_shadow_miss( ray: Ray
         , pixel: i32
         , shader: MaterialShader
         , payload: RayPayload
@@ -578,10 +603,8 @@ fn @make_path_renderer(max_path_len: i32, light_selector: LightSelector, aovs: A
                 let light_buf_pos_corrected = light_buf_pos + 16 * (secondary.s - 1);
 
                 let light_vertex = load_vertex(buf, light_buf_pos_corrected);
-                //TODO wo is wrong????
+                //TODO wo is wrong???? TODO change this
                 let ray = make_ray(light_vertex.pos, light_vertex.wo, offset, flt_max, ray_flag_bounce); //TODO test this!!!!!
-                let ctx = make_miss_shading_context(pixel, ray);
-                let mat = shader(ctx);
 
                 let light_pos = light_vertex.pos;
                 let light_normal = light_vertex.normal;
@@ -592,7 +615,10 @@ fn @make_path_renderer(max_path_len: i32, light_selector: LightSelector, aovs: A
                 let light_dist = vec3_len(light_dir);
                 let light_dist2 = light_dist * light_dist;
 
-                let light_bsdf = mat.bsdf.eval(secondary.light_wo, light_wi); 
+                let ctx = make_miss_contri_shadingContext(pixel, light_pos, secondary.camera_pos, light_normal);
+                let mat = shader(ctx);
+
+                let light_bsdf = mat.bsdf.eval(secondary.light_wo, light_wi);
 
                 let geom_factor = 1 / light_dist2; //the two cos factors should be in in the two bsdf calculations
 
@@ -607,8 +633,11 @@ fn @make_path_renderer(max_path_len: i32, light_selector: LightSelector, aovs: A
                 //let mis_choice = mis * s_choice_pdf; s_choice is already in color!!!
 
                 let mis_contri = color_mulf(contri, mis);
-                
-                make_option(color)
+                // if pixel > 50000 && pixel < 50500{
+                //     print_string("\n");
+                //     print_f32(mis);
+                // }
+                make_option(mis_contri)
             }else{
                 make_option(color)
             }
@@ -813,7 +842,7 @@ fn @make_path_renderer(max_path_len: i32, light_selector: LightSelector, aovs: A
         on_shadow      = on_shadow,
         on_bounce      = on_bounce,
         on_shadow_hit  = TechniqueNoShadowHitFunction,
-        on_shadow_miss = on_shadow_hit,
+        on_shadow_miss = on_shadow_miss,
         primary_payload_count   = 6,
         secondary_payload_count = 12,
     }
