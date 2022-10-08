@@ -437,7 +437,22 @@ fn @make_path_renderer(max_path_len: i32, light_selector: LightSelector, aovs: A
                     //TODO can we use cos_l here???
                     let pdf_dirpos = pdf_area * light_dist2 / (cos_l);
 
-                    let light_beta = color_mulf(light_sample.intensity, 1/(pdf_dirpos * light_select_pdf));
+                    //let light_beta = color_mulf(light_sample.intensity, 1/(pdf_dirpos * light_select_pdf));
+                    //pdf ist schon in light_sample intensity?????
+                    let light_beta = light_sample.intensity;
+
+                    // if (pixel == 56334){
+                    //     print_string("\n");
+                    //     print_f32(light_beta.r);
+                    //     print_string("\n");
+                    //     print_f32(pdf_area);
+                    //     print_string("\n");
+                    //     print_f32(light_dist2);
+                    //     print_string("\n");
+                    //     print_f32(cos_l);
+                    //     print_string("\n");
+                    // }
+
                     let f = mat.bsdf.eval(wi, wo); //Ich gehe davon aus das hier auch schon Cos drinnen ist?
                     let contri = color_mul(color_mul(light_beta, pt.contrib), f);
                     // if(pixel == 468613){
