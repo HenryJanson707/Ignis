@@ -439,7 +439,7 @@ fn @make_path_renderer(max_path_len: i32, light_selector: LightSelector, aovs: A
 
                     //let light_beta = color_mulf(light_sample.intensity, 1/(pdf_dirpos * light_select_pdf));
                     //pdf ist schon in light_sample intensity?????
-                    let light_beta = light_sample.intensity;
+                    let light_beta = color_mulf(light_sample.intensity, 1/light_select_pdf);
 
                     // if (pixel == 56334){
                     //     print_string("\n");
