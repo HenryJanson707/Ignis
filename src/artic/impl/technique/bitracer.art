@@ -1,78 +1,828 @@
-fn @convertDensity(current_pos: Vec3, next_pos: Vec3, next_normal: Vec3, pdf: f32) -> f32{
-    let w       = vec3_sub(next_pos, current_pos);
-    let dist2   = vec3_dot(w, w);
-    let dist    = math_builtins::sqrt(dist2);
-    let dir     = vec3_mulf(w , 1 / dist);
+// // Returns the probability to continue given the contribution of a path
+// fn @russian_roulette(c: Color, clamp: f32) = clampf(2 * color_luminance(c), 0.05, clamp);
 
-    let out_pdf = pdf * absolute_cos(next_normal, dir) / dist2;
-    out_pdf
+// // Russian roulette used in pbrt v4
+// fn @russian_roulette_pbrt(c: Color, clamp: f32) = clampf(color_max_component(c), 0.05, clamp);
+
+//TODO this can be done better
+struct SecondaryPayload{
+    s: i32,
+    t: i32,
+    ri: Vec2,
+    light_wo: Vec3,
+    camera_pos: Vec3,
+}
+//TODO this can be done better
+fn @write_secondarypayload(payload: RayPayload, pt: SecondaryPayload){
+    payload.store_vec4(0, make_vec4(pt.s as f32, pt.t as f32, pt.ri.x, pt.ri.y));
+    payload.store_vec3(4, pt.light_wo);
+    payload.store_vec3(8, pt.camera_pos);
+}
+//TODO this can be done better
+fn @unwrap_secondarypayload(payload: RayPayload) -> SecondaryPayload {
+    let c0 = payload.load_vec4(0);
+    let c1 = payload.load_vec3(4);
+    let c2 = payload.load_vec3(8);
+
+    SecondaryPayload {
+        s = c0.x as i32, //is this realy okay???
+        t = c0.y as i32,
+        ri = make_vec2(c0.z, c0.w),
+        light_wo = c1,
+        camera_pos = c2,
+    }
 }
 
+struct BIRayPayload {
+    mis:     f32,
+    contrib: Color,
+    depth:   i32,
+    eta:     f32
+}
 
-fn @make_light_renderer(buf: DeviceBuffer, max_path_len_light: i32) -> Technique  {
-    let offset:f32 = 0.001;
+fn @write_biraypayload(payload: RayPayload, pt: BIRayPayload) {
+    payload.store_vec4(0, make_vec4(pt.mis, pt.contrib.r, pt.contrib.g, pt.contrib.b));
+    payload.store_vec2(4, make_vec2(pt.depth as f32, pt.eta));
+}
+
+fn @unwrap_biraypayload(payload: RayPayload) -> BIRayPayload {
+    let c0 = payload.load_vec4(0);
+    let c1 = payload.load_vec2(4);
+
+    BIRayPayload {
+        mis = c0.x,
+        contrib = make_color(c0.y, c0.z, c0.w, 1),
+        depth   = c1.x as i32,
+        eta     = c1.y
+    }
+}
+
+fn @init_biraypayload(payload: RayPayload, _: i32, _:i32, _:i32) = write_biraypayload(payload,
+    BIRayPayload {
+        mis = 0,
+        contrib = color_builtins::white,
+        depth   = 1,
+        eta     = 1
+    });
+
+fn @make_bi_emitter_payload_initializer() = EmitterPayloadInitializer{ init = init_biraypayload, count = 6 };
+
+fn @make_bi_renderer(max_path_len: i32, light_selector: LightSelector, aovs: AOVTable, buf: DeviceBuffer, camera_buf: DeviceBuffer, max_path_len_light: i32) -> Technique {
+    let pdf_lightpick = if light_selector.count > 0 {1.0 / (light_selector.count as f32)} else {1.0};
+    let offset : f32  = 0.001;
+
+    // let (film_width, film_height) = device.get_film_size();
+    // let buf_size = film_width * film_height * max_path_len * 16;
+    // let camera_buf = device.request_buffer("camera_path", buf_size, 0);
+    // let aov_stats  = @aovs(AOV_PATH_STATS);
+     
+    //Needs tobe checked 
+    fn pdfLightDirect(current:Vertex, next:Vertex, light_pdf : EmissivePdf) -> f32{
+        let unnorm_w = vec3_sub(next.pos, current.pos);
+        let dist2 = vec3_dot(unnorm_w, unnorm_w);
+        let dist = math_builtins::sqrt(dist2);
+        let norm_w = vec3_divf(unnorm_w, dist);
+        let dir_pdf = light_pdf.pdf_dir; //this needs tobe checked //the pdf is dir pdf
+        let pdf = dir_pdf * 1/dist2;
+        
+        pdf * math_builtins::fabs(vec3_dot(next.normal, norm_w))
+    }
+
+    fn pdfLightEmission(current:Vertex, next:Vertex, light_pdf : EmissivePdf) -> f32{
+        let unnorm_w = vec3_sub(next.pos, current.pos);
+        let dist2 = vec3_dot(unnorm_w, unnorm_w);
+        let dist = math_builtins::sqrt(dist2);
+        let norm_w = vec3_divf(unnorm_w, dist);
+        let dir_pdf = math_builtins::fabs(light_pdf.pdf_dir); //this needs tobe checked //the pdf is dir pdf
+        let pdf = dir_pdf * 1/dist2;
+        pdf * math_builtins::fabs(vec3_dot(next.normal, norm_w))
+    }
+
+    //this needs tobe checked 
+    // fn pdfConection(current:Vertex, prev:Vertex, next:Vertex, light : DirectLightSample, isLight: bool, isCamera: bool, mat: Material) -> f32{
+    //     if isLight{
+    //         return(pdfLightDirect(current, next, light))
+    //     }
+    //     let mut pdf : f32 = 0.0;
+    //     if isCamera{
+    //         pdf = 1.0;
+    //     }else{
+    //         let wn = vec3_normalize(vec3_sub(next.pos, current.pos));
+    //         let wp = vec3_normalize(vec3_sub(prev.pos, current.pos));
+    //         let pdf = mat.bsdf.pdf(wp, wn); //this needs tobe checked 
+    //     }
+    //     return(convertDensity(current.pos, next.pos, next.normal, pdf))//this needs tobe cheked 
+
+    // }
+
+    //this needs tobe checked 
+    fn pdfConectionGround(current:Vertex, prev:Vertex, next:Vertex, mat: Material) -> f32{
+        let mut pdf : f32 = 0.0;
+        let wn = vec3_normalize(vec3_sub(next.pos, current.pos));
+        let wp = vec3_normalize(vec3_sub(prev.pos, current.pos));
+        pdf = mat.bsdf.pdf(wp, wn); //this needs tobe checked 
+        return(convertDensity(current.pos, next.pos, next.normal, pdf))//this needs tobe cheked 
+    }
+
+    //TODO this is only for Debugging!!! Delete after
+    fn pdfConectionGroundPrint(current:Vertex, prev:Vertex, next:Vertex, mat: Material) -> f32{
+        let mut pdf : f32 = 0.0;
+        let wn = vec3_normalize(vec3_sub(next.pos, current.pos));
+        let wp = vec3_normalize(vec3_sub(prev.pos, current.pos));
+        pdf = mat.bsdf.pdf(wp, wn); //this needs tobe checked 
+        print_f32(pdf);
+        return(convertDensity(current.pos, next.pos, next.normal, pdf))//this needs tobe cheked 
+    }
+
+    //Needs tobe checked 
+    fn pdfLightOrigin(current:Vertex, next:Vertex, light_pdf:EmissivePdf, choicePDF : f32) -> f32{
+        let w = vec3_normalize(vec3_sub(next.pos, current.pos)); //currently Useless
+        let pos_pdf = light_pdf.pdf_area; //pdf is Pos/Area
+        pos_pdf * choicePDF
+    }
+
+    //wrong because we need both materials!!
+    //Check this!!
+    fn MISWeightS0(camBuf: DeviceBuffer, lightBuf: DeviceBuffer, pixel:i32, t:i32, pdfLightpick: f32, light_pdf : EmissivePdf) -> f32{
+        //The current size of one data point is 16 bytes (valid: i32 (0, 1): 0, material: i32: 1, pdfFwd: f32 : 2, pdfRev: f32: 3, pos: vec3 : 4, normal: vec3 : 7, beta: vec3 : 10, wo: vec3 : 13)
+        let startCamBuff = 16 * pixel * max_path_len;
+        let startLightBuf = 16 * pixel * max_path_len_light;
+        let mut pt = if t > 0 {load_vertex(camBuf, startCamBuff + 16 * (t-1))} else {make_empty_Vertex()};
+        let mut ptMinus = if t > 1 {load_vertex(camBuf, startCamBuff + 16 * (t-2))} else {make_empty_Vertex()};
+
+        let mut sumRi : f32 = 0.0;
+
+        let mut ri : f32 = 1.0;
+
+        if pt.valid != 0 && t - 1 > 1{
+            let ptPdfRev = pdfLightpick * light_pdf.pdf_area; //pdfLightOrigin //pdf is Pos/Area
+            ri *= safe_div(ptPdfRev, pt.pdfFwd);
+            sumRi += ri;
+        }
+        if ptMinus.valid != 0 && t - 2 > 1{
+            let ptMinusPdfRev = pdfLightEmission(pt, ptMinus, light_pdf);
+            ri *= safe_div(ptMinusPdfRev, ptMinus.pdfFwd);
+            sumRi += ri;
+        }
+
+        //this could be wrong???
+        let mut i = t-3;
+        while i > 1{
+            ri *= safe_div(load_vertex_pdfRev(camBuf, startCamBuff + 16 * i), load_vertex_pdfFwd(camBuf, startCamBuff + 16 * i));
+            sumRi += ri;
+            i -= 1;
+        }
+        
+        // for i in range_step(t-3, 1, -1){
+        //     //this just seems wrong
+        //     //ri *= camBuf.load_f32(startCamBuff + 16 * i + 3) / camBuf.load_f32(startCamBuff + 16 * i + 2);
+        //     //This is most likly wrong
+        //     print_i32(i);
+        //     ri *= load_vertex_pdfRev(camBuf, startCamBuff + 16 * i) / load_vertex_pdfFwd(camBuf, startCamBuff + 16 * i);
+        //     sumRi += ri;
+        // }
+
+        return(1.0 / (1.0 + sumRi))
+    }
+    //wrong because we need both materials!!
+    //Check this!!
+    fn MISWeightS1(camBuf: DeviceBuffer, lightBuf: DeviceBuffer, pixel:i32, t:i32, light_pdf : EmissivePdf, mat: Material, sampled: Vertex) -> f32{
+        //The current size of one data point is 16 bytes (valid: i32 (0, 1): 0, material: i32: 1, pdfFwd: f32 : 2, pdfRev: f32: 3, pos: vec3 : 4, normal: vec3 : 7, beta: vec3 : 10, wo: vec3 : 13)
+        let startCamBuff = 16 * pixel * max_path_len;
+        let startLightBuf = 16 * pixel * max_path_len_light;
+        let mut pt = if t > 0 {load_vertex(camBuf, startCamBuff + 16 * (t-1))} else {make_empty_Vertex()};
+        let mut ptMinus = if t > 1 {load_vertex(camBuf, startCamBuff + 16 * (t-2))} else {make_empty_Vertex()};
+        let qs = sampled;
+
+        let mut sumRi : f32 = 0.0;
+
+        let mut ri :f32 = 1.0;
+
+        if pt.valid != 0 && t - 1 > 1{
+            let ptPdfRev = pdfLightDirect(qs, pt, light_pdf); //this is most likly wrong 
+            ri *= safe_div(ptPdfRev, pt.pdfFwd);
+            sumRi += ri;
+        }
+
+        if ptMinus.valid != 0 && t - 2 > 1{
+            let ptMinusPdfRev = pdfConectionGround(pt, qs, ptMinus, mat);
+            ri *= safe_div(ptMinusPdfRev, ptMinus.pdfFwd);
+            sumRi += ri;
+        }
+
+        //this could be wrong???
+        let mut i = t-3;
+        while i > 1{
+            ri *= safe_div(load_vertex_pdfRev(camBuf, startCamBuff + 16 * i), load_vertex_pdfFwd(camBuf, startCamBuff + 16 * i));
+            sumRi += ri;
+            i -= 1;
+        }
+
+        // for i in range_step(t-3, 1, -1){
+        //     //this just seems wrong
+        //     //ri *= camBuf.load_f32(startCamBuff + 16 * i + 3) / camBuf.load_f32(startCamBuff + 16 * i + 2);
+        //     //This is most likly wrong
+        //     ri *= load_vertex_pdfRev(camBuf, startCamBuff + 16 * i) / load_vertex_pdfFwd(camBuf, startCamBuff + 16 * i);
+        //     sumRi += ri;
+        // }
+
+        ri = 1.0;
+
+        let qsPdfRev = pdfConectionGround(pt, ptMinus, qs, mat);
+        ri *= safe_div(qsPdfRev, qs.pdfFwd);
+        sumRi += ri;
+
+        return(1.0 / (1.0 + sumRi))
+    }
+
+    //TODO not all of the varibles are needed make it better
+    fn MISWeightCamera(camBuf: DeviceBuffer, lightBuf: DeviceBuffer, pixel:i32, s:i32, t:i32, mat: Material) -> Vec2{
+        let startCamBuff = 16 * pixel * max_path_len;
+        let startLightBuf = 16 * pixel * max_path_len_light;
+        // let current_buf_pos = buf_pos + pt.depth * 16;
+        let mut qs = load_vertex(lightBuf, startLightBuf + 16 * (s-1));
+        let mut pt = if t > 0 {load_vertex(camBuf, startCamBuff + 16 * (t-1))} else {make_empty_Vertex()};
+        let mut qsMinus = load_vertex(lightBuf, startLightBuf + 16 * (s-2));
+        let mut ptMinus = if t > 1 {load_vertex(camBuf, startCamBuff + 16 * (t-2))} else {make_empty_Vertex()};
+
+        let mut ri1 : f32 = 0.0;
+
+        //this is the camera Part
+        if ptMinus.valid != 0 && t - 2 > 1{
+            let ptMinusPdfRev = pdfConectionGround(pt, qs, ptMinus, mat);
+            ri1 = safe_div(ptMinusPdfRev, ptMinus.pdfFwd);
+        }
+
+
+        let qsPdfRev = pdfConectionGround(pt, ptMinus, qs, mat);
+        let ri2 : f32 = safe_div(qsPdfRev, qs.pdfFwd);
+
+        return (make_vec2(ri1, ri2))
+    }
+
+
+    //TODO not all of the varibles are needed make it better
+    fn MISWeight(camBuf: DeviceBuffer, lightBuf: DeviceBuffer, pixel:i32, s:i32, t:i32, mat: Material, contri: f32, current_ri: Vec2) -> f32{ //the contri is only
+        let startCamBuff = 16 * pixel * max_path_len;
+        let startLightBuf = 16 * pixel * max_path_len_light;
+        // let current_buf_pos = buf_pos + pt.depth * 16;
+        let mut qs = load_vertex(lightBuf, startLightBuf + 16 * (s-1));
+        let mut pt = if t > 0 {load_vertex(camBuf, startCamBuff + 16 * (t-1))} else {make_empty_Vertex()};
+        let mut qsMinus = load_vertex(lightBuf, startLightBuf + 16 * (s-2));
+        let mut ptMinus = if t > 1 {load_vertex(camBuf, startCamBuff + 16 * (t-2))} else {make_empty_Vertex()};
+
+        let mut sumRi : f32 = 0.0;
+
+        let mut ri :f32 = 1.0;
+
+        if pt.valid != 0 && t - 1 > 1{
+            let ptPdfRev = pdfConectionGround(qs, qsMinus, pt, mat); //this is most likly wrong 
+            ri *= safe_div(ptPdfRev, pt.pdfFwd);
+            sumRi += ri;
+        }
+        if ptMinus.valid != 0 && t - 2 > 1{
+            ri *= current_ri.x;
+            sumRi += ri;
+        }
+
+        let mut i = t-3;
+        //this could be wrong???
+        while i > 1{
+            ri *= safe_div(load_vertex_pdfRev(camBuf, startCamBuff + 16 * i), load_vertex_pdfFwd(camBuf, startCamBuff + 16 * i)); //Extra check here
+            sumRi += ri;
+            i -= 1;
+        }
+
+        // for i in range_step(t-3, 1, -1){
+        //     //this just seems wrong
+        //     //ri *= camBuf.load_f32(startCamBuff + 16 * i + 3) / camBuf.load_f32(startCamBuff + 16 * i + 2);
+        //     //This is most likly wrong
+        //     ri *= load_vertex_pdfRev(camBuf, startCamBuff + 16 * i) / load_vertex_pdfFwd(camBuf, startCamBuff + 16 * i);
+        //     sumRi += ri;
+        // }
+
+        ri = 1.0;
+        
+        ri *= current_ri.y;
+        sumRi += ri;
+        
+
+        let qsMinusPdfRev = pdfConectionGround(qs, pt, qsMinus, mat);
+        ri *= safe_div(qsMinusPdfRev, qsMinus.pdfFwd);
+        sumRi += ri;
+        
+        //this is only for debugging
+        // if qs.pdfFwd == 0.0 && qs.pos.x != 0.0{
+        //     ig_trap();
+        // }
+        
+
+        i = s-3;
+        //this could be wrong???
+        //the NaN is here!!!!!!!!
+        while i > -1{
+            ri *= safe_div(load_vertex_pdfRev(lightBuf, startLightBuf + 16 * i), load_vertex_pdfFwd(lightBuf, startLightBuf + 16 * i)); //Extra check here
+            sumRi += ri;
+            i -= 1;
+        }
+        
+
+        //TODO we need to finde a better way
+        // if contri > 1 && qsPdfRev < 0.01{
+        //     sumRi = 1000000000.0;
+        // }
+
+        // for i in range_step(t-3, -1, -1){
+        //     //this just seems wrong 
+        //     //there might be a mistake here because of the case 0
+        //     //ri *= lightBuf.load_f32(startLightBuf + 16 * i + 3) / lightBuf.load_f32(startLightBuf + 16 * i + 2);
+        //     //This is most likly wrong
+        //     ri *= load_vertex_pdfRev(lightBuf, startLightBuf + 16 * i) / load_vertex_pdfFwd(lightBuf, startLightBuf + 16 * i); //Extra check here
+        //     sumRi += ri;
+        // }
+
+        return(1.0 / (1.0 + sumRi))
+    }
+    
+    
+
+
+    fn @on_shadow( ctx: ShadingContext
+                 , rnd: &mut RndState
+                 , payload: RayPayload
+                 , secondary_payloads: RayPayload
+                 , mat: Material
+                 ) -> ShadowRay {
+        
+        if light_selector.count == 0{
+            return(ShadowRay::None)
+        }
+
+        let pt = unwrap_biraypayload(payload);
+        let surf = ctx.surf;
+        let ray = ctx.ray;
+        let pixel = ctx.pixel;
+
+        if pt.depth >= max_path_len {
+            return(ShadowRay::None)
+        }
+
+        let light_buf_pos  = 16 * pixel * max_path_len_light;
+        let camera_buf_pos = 16 * pixel * max_path_len;
+
+        let light_path_len = load_vertex_valid(buf, light_buf_pos);
+
+        let choice = if light_path_len == 0 {1} else {pick_light_id(rnd, light_path_len) + 1};
+        //let s = if light_path_len >= 3 {3} else {0}; //important currently there is no choice here!!!!
+        let s = choice;
+        //let s = if light_path_len >= 3 {3} else {0};
+        //let s = 0;
+        //let s = 2;
+        //let s = 1;
+        let t = pt.depth + 1;
+
+
+        let s_choice_pdf = if light_path_len > 0 {light_path_len as f32} else {1}; //this will be a problem if light_path_len is 0 TODO Fix
+
+        if s == 1{
+            let (light, light_select_pdf) = light_selector.sample(rnd, ctx.surf.point); //sollte eventuel wie im normalen pathtracer angepasst werden!!
+            let sample_direct = light.sample_direct;
+            let light_sample  = @sample_direct(rnd, surf);
+
+
+            if light.infinite{
+                return(ShadowRay::None)
+            }else{
+                if light_sample.pdf.value <= flt_eps{ //pdf is Pos/Area
+                    return(ShadowRay::None)
+                }
+                let light_dir = vec3_sub(light_sample.pos, surf.point);
+                let light_dist = vec3_len(light_dir);
+                let light_dist2 = light_dist * light_dist;
+                let wi = vec3_mulf(light_dir, 1/light_dist);
+                let wo = vec3_neg(ray.dir);
+
+                let vis = vec3_dot(light_dir, surf.local.col(2));
+                // if vis > flt_eps && light_sample.cos > flt_eps && pt.depth == 2{
+                if vis > flt_eps && light_sample.cos > flt_eps{
+                    let conection_dir = vec3_sub(light_sample.pos, surf.point);
+                    let conection_ray = make_ray(light_sample.pos, conection_dir, 0, flt_max, ray_flag_bounce);
+
+                    let light_normal = make_vec3(0.5369, -0.843659, 0.0000); //this is only temporary
+
+                    let light_surf = SurfaceElement{
+                        is_entering = true,
+                        point = light_sample.pos,
+                        face_normal = light_normal,
+                        inv_area = 1, //TODO this is wrong but should not matter 
+                        prim_coords = make_vec2(0,0),
+                        tex_coords = make_vec2(0,0),
+                        local = make_orthonormal_mat3x3(light_normal)
+                    };
+                    
+                    //we need to create the light surface here!!!!!!!
+
+                    let pdf_em = light.pdf_emission(conection_ray, light_surf); //this is mostlikly wrong
+
+                    let cos_l = light_sample.cos;
+                    let pdf_area = pdf_em.pdf_area; //pdf is Pos/Area
+                    //TODO can we use cos_l here???
+                    let pdf_dirpos = pdf_area * light_dist2 / (cos_l);
+
+                    //let light_beta = color_mulf(light_sample.intensity, 1/(pdf_dirpos * light_select_pdf));
+                    //pdf ist schon in light_sample intensity?????
+                    let light_beta = color_mulf(light_sample.intensity, 1/light_select_pdf);
+
+                    // if (pixel == 56334){
+                    //     print_string("\n");
+                    //     print_f32(light_beta.r);
+                    //     print_string("\n");
+                    //     print_f32(pdf_area);
+                    //     print_string("\n");
+                    //     print_f32(light_dist2);
+                    //     print_string("\n");
+                    //     print_f32(cos_l);
+                    //     print_string("\n");
+                    // }
+
+                    let f = mat.bsdf.eval(wi, wo); //Ich gehe davon aus das hier auch schon Cos drinnen ist?
+                    let contri = color_mul(color_mul(light_beta, pt.contrib), f);
+                    // if(pixel == 468613){
+                    //     print_string("\n");
+                    //     print_f32(1/pdf_dirpos);
+                    //     print_string("\n");
+                    //     print_f32(light_sample.pdf_area);
+                    //     print_string("\n");
+                    //     print_f32(pdf_lightpick);
+                    //     print_string("\n");
+                    //     print_f32(cos_l);
+                    //     print_string("\n");
+                    //     print_f32(1/light_dist2);
+                    //     print_string("\n");
+                    // }
+
+                    //There are some felds missing like normal and dir is that important?????
+                    let mut sampled = make_empty_Vertex();
+                    sampled.valid = 1;
+                    sampled.pos = light_sample.pos;
+                    sampled.beta = light_beta;
+                    sampled.normal = make_vec3(0.5369, -0.843659, 0.0000); //this is only temporary and is should be fixed
+                    let mut pt = make_empty_Vertex();
+                    //this should be enough but im not quit sure 
+                    pt.valid = 1;
+                    pt.pos = surf.point;
+                    //we need pt wich should be the current Vertex??
+
+                    sampled.pdfFwd = pdfLightOrigin(sampled, pt, pdf_em, light_select_pdf);//is the order corect here?//and dont we need corection
+                    //i hope we dont need the normal!!!!
+
+                    let mis = MISWeightS1(camera_buf, buf, pixel, t, pdf_em, mat, sampled); //s_choice_pdf is needed because we need to acount for chocing a technike 
+                    let mis_choice = mis * s_choice_pdf;
+
+                    let mis_contri = color_mulf(contri, mis_choice);
+                    
+                    write_secondarypayload(secondary_payloads, SecondaryPayload {
+                        s=s,
+                        t=t,
+                        ri=make_vec2(0.0, 0.0),
+                        light_wo=make_vec3(0.0, 0.0, 0.0),
+                        camera_pos=make_vec3(0.0, 0.0, 0.0),
+
+                    });
+                    return(make_simple_shadow_ray(
+                        make_ray(surf.point, light_dir, offset, 1 - offset, ray_flag_light),
+                        mis_contri
+                    ))
+                }else{
+                    return(ShadowRay::None)
+                }
+            }
+        }else if s > 1{
+            let camera_pos = surf.point;
+            let camera_wo = vec3_neg(ray.dir);
+            let camera_beta = pt.contrib;
+
+            let light_buf_pos_corrected = light_buf_pos + 16 * (s - 1);
+
+            //TODO importently not all values here are needed delete the rest, aspschly for the Light ones
+            let light_vertex = load_vertex(buf, light_buf_pos_corrected);
+            //The current size of one data point is 16 bytes (valid: i32 (0, 1): 0, material: i32: 1, pdfFwd: f32 : 2, pdfRev: f32: 3, pos: vec3 : 4, normal: vec3 : 7, beta: vec3 : 10, wo: vec3 : 13)
+            //TODO importently not all values here are needed delete the rest, aspschly for the Light ones
+            let light_pos = light_vertex.pos;
+            let light_normal = light_vertex.normal;
+            let light_beta = light_vertex.beta;
+            let light_wi = light_vertex.wo;
+
+            let light_dir = vec3_sub(light_pos, camera_pos);
+            let light_dist = vec3_len(light_dir);
+            let light_dist2 = light_dist * light_dist;
+
+            let camera_wi = vec3_mulf(light_dir, 1/light_dist);
+            let light_wo = vec3_neg(camera_wi);
+            
+            let vis_camera = vec3_dot(camera_wi, surf.face_normal);
+            let vis_camera2 = vec3_dot(camera_wo, surf.face_normal);
+            let vis_light = vec3_dot(light_wo, light_normal);
+            let vis_light2 = vec3_dot(light_wi, light_normal);
+            // if vis_camera > flt_eps && vis_camera2 > flt_eps && vis_light > flt_eps && vis_light2 > flt_eps && pt.depth == 1{
+            if vis_camera > flt_eps && vis_camera2 > flt_eps && vis_light > flt_eps && vis_light2 > flt_eps{ 
+                let light_surf = SurfaceElement{
+                    is_entering = true,
+                    point = light_pos,
+                    face_normal = light_normal,
+                    inv_area = 1, //TODO this is wrong but should not matter 
+                    prim_coords = make_vec2(0,0),
+                    tex_coords = make_vec2(0,0),
+                    local = make_orthonormal_mat3x3(light_normal)
+                };
+
+                let camera_bsdf = mat.bsdf.eval(camera_wi, camera_wo);
+                let importance = color_mulf(color_mul(camera_bsdf, camera_beta),s_choice_pdf); //we add s_choice_pdf here because other wise we would need more memory 
+                let current_ri = MISWeightCamera(camera_buf, buf, pixel, s, t, mat);
+
+                // let light_mat = make_diffuse_bsdf(light_surf, make_color(0.8,0.8,0.8,1));
+
+                // let geom_factor = 1 / light_dist2; //the two cos factors should be in in the two bsdf calculations
+                // let camera_bsdf = mat.bsdf.eval(camera_wi, camera_wo);
+
+                // let light_bsdf = light_mat.eval(light_wo, light_wi); 
+                // let conection = color_mulf(color_mul(camera_bsdf, light_bsdf), geom_factor);
+                // let contri = color_mul(color_mul(conection, camera_beta), light_beta);
+
+                // let current_ri = MISWeightCamera(camera_buf, buf, pixel, s, t, mat, contri.r); //s_choice_pdf is needed because we need to acount for chocing a technike 
+                // let mis_choice = mis * s_choice_pdf;
+
+                // let mis_contri = color_mulf(contri, mis_choice);
+
+                write_secondarypayload(secondary_payloads, SecondaryPayload {
+                    s=s,
+                    t=t,
+                    ri=current_ri,
+                    light_wo=light_wo,
+                    camera_pos=camera_pos,
+                });
+                return(make_advanced_shadow_ray(
+                    make_ray(surf.point, light_dir, offset, 1 - offset, ray_flag_light),
+                    importance,
+                    light_vertex.mat
+                ))
+            }else{
+                ShadowRay::None
+            }
+        }else{
+            ShadowRay::None
+        }
+    }
+
+    fn @make_miss_contri_shadingContext(pixel : i32, hitPLight : Vec3, hitPCam : Vec3, normal : Vec3) -> ShadingContext{
+        let dir = vec3_sub(hitPLight, hitPCam);
+        let ray = make_ray(hitPLight, dir, offset, flt_max, ray_flag_light);
+        let hit = make_hit(0, 0, vec3_dist(hitPLight, hitPCam), make_vec2(0,0));
+        let uvw = make_vec3(0,0,0);
+        let surf = SurfaceElement{
+            is_entering = false,
+            point = hitPLight,
+            face_normal = normal,
+            inv_area = 0.0,
+            prim_coords = make_vec2(0,0),
+            tex_coords = make_vec2(0,0),
+            local = make_orthonormal_mat3x3(normal)
+        };
+        ShadingContext{
+            entity_id = 0,
+            pixel = pixel,
+            ray = ray,
+            hit = hit,
+            surf = surf,
+            uvw = uvw
+        }
+    }
+
+
+    fn @on_shadow_miss( ray: Ray
+        , pixel: i32
+        , shader: MaterialShader
+        , payload: RayPayload
+        , color: Color) -> Option[Color] {
+            let secondary = unwrap_secondarypayload(payload);
+            if secondary.s > 1{
+                let light_buf_pos  = 16 * pixel * max_path_len_light;
+                let light_buf_pos_corrected = light_buf_pos + 16 * (secondary.s - 1);
+
+                let light_vertex = load_vertex(buf, light_buf_pos_corrected);
+                //TODO wo is wrong???? TODO change this
+                let ray = make_ray(light_vertex.pos, light_vertex.wo, offset, flt_max, ray_flag_bounce); //TODO test this!!!!!
+
+                let light_pos = light_vertex.pos;
+                let light_normal = light_vertex.normal;
+                let light_beta = light_vertex.beta;
+                let light_wi = light_vertex.wo;
+
+                let light_dir = vec3_sub(light_pos, secondary.camera_pos);
+                let light_dist = vec3_len(light_dir);
+                let light_dist2 = light_dist * light_dist;
+
+                let ctx = make_miss_contri_shadingContext(pixel, light_pos, secondary.camera_pos, light_normal);
+                let mat = shader(ctx);
+
+                let light_bsdf = mat.bsdf.eval(secondary.light_wo, light_wi);
+
+                let geom_factor = 1 / light_dist2; //the two cos factors should be in in the two bsdf calculations
+
+                let conection = color_mulf(light_bsdf, geom_factor);
+                let contri = color_mul(color_mul(conection, color), light_beta);
+                // let light_bsdf = light_mat.eval(light_wo, light_wi); 
+                // let conection = color_mulf(color_mul(camera_bsdf, light_bsdf), geom_factor);
+                // let contri = color_mul(color_mul(conection, camera_beta), light_beta);
+
+                let mis = MISWeight(camera_buf, buf, pixel, secondary.s, secondary.t, mat, contri.r, secondary.ri); //the solution could change here because we added s_choice already
+
+                //let mis_choice = mis * s_choice_pdf; s_choice is already in color!!!
+
+                let mis_contri = color_mulf(contri, mis);
+                // if pixel > 50000 && pixel < 50500{
+                //     print_string("\n");
+                //     print_f32(mis);
+                // }
+                make_option(mis_contri)
+            }else{
+                make_option(color)
+            }
+
+    }
+
+
+
+    fn @on_hit( ctx: ShadingContext
+              , payload: RayPayload
+              , mat: Material
+              ) -> Option[Color] {
+        let pt = unwrap_biraypayload(payload);
+        let surf = ctx.surf;
+        let ray = ctx.ray;
+        let pixel = ctx.pixel;
+        let t = pt.depth + 1;
+        // if pt.depth == 1 {
+        //     aov_normal.splat(pixel, make_color(math_builtins::fabs(surf.local.col(2).x),
+        //                                        math_builtins::fabs(surf.local.col(2).y),
+        //                                        math_builtins::fabs(surf.local.col(2).z),
+        //                                        1));
+        // }
+
+        let wo = vec3_neg(ray.dir);
+        let buf_pos = 16 * pixel * max_path_len;
+
+        let beta = pt.contrib;
+        //it need to retestet if the first pdfFwd = 1.0 ist!!!
+        let pdfFwd = if pt.depth == 1 {1.0} else {pt.mis}; //this seems wrong but it could work???? 
+        
+        // let rr_prob = russian_roulette_pbrt(color_mulf(pt.contrib, pt.eta * pt.eta), 0.95);
+        // if pt.depth + 1 > max_path_len || randf(rnd) >= rr_prob {
+        //     return(Option[(Ray, RayPayload)]::None)
+        // }
+        
+        let current_buf_pos = buf_pos + pt.depth * 16;
+        let prev_buf_pos = buf_pos + (pt.depth - 1) * 16;
+
+        let current_pos = surf.point;
+        let current_normal = surf.face_normal;
+        
+        let prev_vertex     = load_vertex(camera_buf, prev_buf_pos);
+        let prev_pos        = if pt.depth == 1 {ray.org} else {prev_vertex.pos}; //this should fix the problem with pt.depth == 0 problem but is not the best way!! //this has tobe checked again
+        
+        //Currently this is wrong because 0 prev_pos is wrong because its not currently known for pt.depth = 0
+        let mut correctedFwdPDF = convertDensity(prev_pos, current_pos, current_normal, pdfFwd);
+
+        //TODO this seems to be a wrong way of handeling this problem
+
+        //The current size of one data point is 16 bytes (valid: i32 (0, 1): 0, material: i32: 1, pdfFwd: f32 : 2, pdfRev: f32: 3, pos: vec3 : 4, normal: vec3 : 7, beta: vec3 : 10, wo: vec3 : 13)
+        
+        let current_vertex = Vertex {
+            valid =      1,
+            mat =        -1,
+            pdfFwd =     correctedFwdPDF,
+            pdfRev =     0.0,
+            pos =        current_pos,
+            normal =     current_normal,
+            beta =       beta,
+            wo =         wo
+        };
+        store_vertex(camera_buf, current_buf_pos, current_vertex);
+        //store_vertex_data(camera_buf, current_buf_pos, 1, -1, correctedFwdPDF, 0.0, current_pos, current_normal, beta, wo);
+
+        // Hits on a light source
+        if mat.is_emissive && surf.is_entering {
+            let out_dir = vec3_neg(ray.dir);
+            let dot     = vec3_dot(out_dir, surf.local.col(2));
+            if dot > flt_eps { // Only contribute proper aligned directions
+                let emit     = mat.emission(ctx);
+                let light   = mat.light;
+
+                let conection_dir = vec3_sub(surf.point, prev_pos);
+                let conection_ray = make_ray(surf.point, conection_dir, 0, flt_max, ray_flag_bounce);
+
+                let pdf_em = light.pdf_emission(conection_ray, surf); //this is mostlikly wrong
+
+                // let next_mis = pt.mis * hit.distance * hit.distance / dot;
+                // let mis      = 1 / (1 + next_mis * pdf_lightpick * emit.pdf_area);
+                // let contrib  = color_mulf(color_mul(pt.contrib, emit.intensity), mis);
+                
+                // //aov_di.splat(pixel, contrib);
+                let current_pos = surf.point;
+                // let current_light = mat.emission(current_pos);
+                let contrib = color_mul(pt.contrib, emit.intensity);
+                let mis = MISWeightS0(camera_buf, buf, pixel, t, pdf_lightpick, pdf_em); //the pt.depth thing is motlikly wrong
+
+                return(make_option(color_mulf(contrib,mis)))
+                //return(Option[Color]::None)
+            }
+        }
+        Option[Color]::None
+    }
+
+
+    fn @on_miss( ray: Ray
+               , pixel: i32
+               , payload: RayPayload) -> Option[Color] {
+        // let mut inflights = 0;
+        // let mut color     = black;
+
+        // // Due to the renderer design, this will only iterate through
+        // // infinite lights, as a miss shader does not contain area lights
+        // for light_id in unroll(0, num_lights) {
+        //     let light = @lights(light_id);
+        //     // Do not include delta lights or finite lights
+        //     if light.infinite && !light.delta {
+        //         let pt = unrap_ptraypayload(payload);
+
+        //         inflights += 1;
+
+        //         let out_dir = vec3_neg(ray.dir);
+        //         let emit    = light.emission(out_dir, make_invalid_surface_element());
+        //         let mis     = 1 / (1 + pt.mis * pdf_lightpick * emit.pdf_dir);
+        //         color = color_add(color, color_mulf(color_mul(pt.contrib, emit.intensity), mis));
+        //     }
+        // }
+
+        // if inflights > 0 {
+        //     aov_di.splat(pixel, color);
+        //     make_option(color)
+        // } else {
+        //     Option[Color]::None
+        // }
+        Option[Color]::None
+    }
 
     fn @on_bounce( ctx: ShadingContext
-        , rnd: &mut RndState
-        , payload: RayPayload
-        , mat: Material
-                    ) -> Option[Ray] {
-        let pt = unwrap_ptraypayload(payload);
-        let ray = ctx.ray;
+                , rnd: &mut RndState
+                , payload: RayPayload
+                , mat: Material
+                 ) -> Option[Ray] {
+        let pt = unwrap_biraypayload(payload);
         let surf = ctx.surf;
+        let ray = ctx.ray;
         let pixel = ctx.pixel;
         
-        //TODO is that at the right position or should it be further down?
-        if pt.depth >= max_path_len_light {
+        // if pt.depth + 1 > max_path_len {
+        //     return(Option[(Ray, RayPayload)]::None)
+        // }
+
+        if pt.depth >= max_path_len {
             return(Option[Ray]::None)
         }
 
-        //aov_stats.splat(pixel, make_color(if pt.depth == 1 { 2 } else { 1 }, 0, 0));
+        let buf_pos = 16 * pixel * max_path_len;
+        let prev_buf_pos = buf_pos + (pt.depth - 1) * 16;
 
+        //print_i32(pt.depth);
+        // aov_stats.splat(pixel, make_color(if pt.depth == 1 { 2 } else { 1 }, 0, 0));
         // Bounce
-        let wo       = vec3_neg(ray.dir);
-        let buf_pos  = 16 * pixel * max_path_len_light;
-        //TODO check wo?
-        if let Option[BsdfSample]::Some(mat_sample) = mat.bsdf.sample(rnd, wo, true) {
-            let mut beta   = pt.contrib;
-            let mut pdfFwd = pt.mis;
+        let wo = vec3_neg(ray.dir);
+        let beta = pt.contrib;
+        let current_pos = surf.point;
 
-            let current_buf_pos = buf_pos + pt.depth * 16;
-            let prev_buf_pos = buf_pos + (pt.depth - 1) * 16;
-
-            if pt.depth == 1{ //TODO we assume here that the fist hit is state.dpeth == 1 this has to be tested
-                let start_vertex = load_vertex(buf, current_buf_pos);  
-
-                pdfFwd     = start_vertex.pdfFwd;
-                beta       = start_vertex.beta;
-            }
-
-            let pdfRev = mat.bsdf.pdf(mat_sample.in_dir, wo); //this could be wrong!!!!
-
-            let current_pos     = surf.point;
-            let current_normal  = surf.face_normal;
-
-            let prev_vertex = load_vertex(buf, prev_buf_pos);
-
-            let prev_pos        = prev_vertex.pos;
-            let prev_normal     = prev_vertex.normal;
-
-            let correctedFwdPDF = convertDensity(prev_pos, current_pos, current_normal, pdfFwd);
-            let correctedRevPDF = convertDensity(current_pos, prev_pos, prev_normal, pdfRev);
-
-            store_vertex_pdfRev(buf, prev_buf_pos, correctedRevPDF);
-            store_vertex_valid(buf, buf_pos, pt.depth + 1);//this means the first pixel position indicates the depth
-
-            //The current size of one data point is 16 bytes (valid: i32 (0, 1): 0, material: i32: 1, pdfFwd: f32 : 2, pdfRev: f32: 3, pos: vec3 : 4, normal: vec3 : 7, beta: vec3 : 10, wo: vec3 : 13)
-            store_vertex_data(buf, current_buf_pos, 1, mat.id, correctedFwdPDF, 0.0, current_pos, current_normal, beta, wo);
-
+        if let Option[BsdfSample]::Some(mat_sample) = mat.bsdf.sample(rnd, wo, false) {
             let next_pdf = mat_sample.pdf;
-            if next_pdf == 0.0{ //TODO better use Epsilon?
+            if next_pdf == 0.0{
                 return(Option[Ray]::None)
             }
             let next_contri = color_mul(beta, mat_sample.color); //cos and pdf is already applied
 
-            write_ptraypayload(payload, PTRayPayload {
+            let prev_vertex     = load_vertex(camera_buf, prev_buf_pos);
+
+            let prev_pos        = if pt.depth == 1 {ray.org} else {prev_vertex.pos};//this has tobe checked again
+            let prev_normal     = prev_vertex.normal;
+
+            let mut correctedRevPDF : f32 = 0.0;
+            let pdfRev = mat.bsdf.pdf(mat_sample.in_dir, wo); //this could be wrong!!!!
+
+            if pt.depth != 1{
+                correctedRevPDF = convertDensity(current_pos, prev_pos, prev_normal, pdfRev);
+            }
+
+            store_vertex_pdfRev(camera_buf, prev_buf_pos, correctedRevPDF);
+            
+            write_biraypayload(payload, BIRayPayload {
                 mis = next_pdf,
                 contrib = next_contri,
                 depth = pt.depth + 1,
@@ -81,28 +831,26 @@ fn @make_light_renderer(buf: DeviceBuffer, max_path_len_light: i32) -> Technique
             make_option(make_ray(surf.point, mat_sample.in_dir, offset, flt_max, ray_flag_bounce))
             // make_option(
             //     make_ray(surf.point, mat_sample.in_dir, offset, flt_max, ray_flag_bounce),
-            //     wrap_ptraypayload(PTRayPayload {
-            //         mis = next_pdf,
+            //     wrap_ptraypayload(BIRayPayload {
+            //         mis     = next_pdf,
             //         contrib = next_contri,
-            //         depth = pt.depth + 1,
-            //         eta  = pt.eta * mat_sample.eta
+            //         depth   = pt.depth + 1,
+            //         eta     = pt.eta * mat_sample.eta
             //     })
             // )
         } else {
             Option[Ray]::None
         }
     }
-
+    //the Secondary_payload could be smaller
     Technique {
-        on_hit    = @ |_, _, _| Option[(Color)]::None,
-        on_miss   = @ |_, _, _| Option[(Color)]::None,
-        on_shadow = @ |_, _, _, _, _| ShadowRay::None,
+        on_hit         = on_hit,
+        on_miss        = on_miss,
+        on_shadow      = on_shadow,
         on_bounce      = on_bounce,
-        on_shadow_hit  = @ |_, _, _, _, _| Option[(Color)]::None,
-        on_shadow_miss = @ |_, _, _, _, _| Option[(Color)]::None,
+        on_shadow_hit  = TechniqueNoShadowHitFunction,
+        on_shadow_miss = on_shadow_miss,
         primary_payload_count   = 6,
-        secondary_payload_count = 0,
+        secondary_payload_count = 12,
     }
 }
-
-

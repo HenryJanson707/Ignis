@@ -1,6 +1,6 @@
 {
 	"technique": {
-		"type": "path",
+		"type": "bi",
 		"max_depth": 5
 	},
 	"camera": {

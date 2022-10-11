@@ -34,22 +34,22 @@ static void ao_body_loader(std::ostream& stream, const std::string&, const std::
     stream << "  let technique = make_ao_renderer();" << std::endl;
 }
 
-static TechniqueInfo bi_get_info(const std::string&, const std::shared_ptr<Parser::Object>& technique, const LoaderContext&){
-    TechniqueInfo info;
-    return info;
-    //info.OverrideCameraGenerator.push_back("light"); //TODO Check if this works???
-}
+// static TechniqueInfo bi_get_info(const std::string&, const std::shared_ptr<Parser::Object>& technique, const LoaderContext&){
+//     TechniqueInfo info;
+//     return info;
+//     //info.OverrideCameraGenerator.push_back("light"); //TODO Check if this works???
+// }
 
-static void bi_body_loader(std::ostream& stream, const std::string&, const std::shared_ptr<Parser::Object>&, LoaderContext&)
-{
-    stream << " let work_info = get_work_info();" << std::endl;
-    stream << "  let film_width = work_info.width;" << std::endl;
-    stream << "  let film_height = work_info.height;" << std::endl;
-    stream << "  let max_depth_light = 5;" << std::endl;
-    stream << "  let buf_size = film_width * film_height * max_depth_light * 16;" << std::endl;
-    stream << "  let buf = device.request_buffer(\"bi\", buf_size, 0);" << std::endl;
-    stream << "  let technique = make_light_renderer(buf, max_depth_light);" << std::endl;
-}
+// static void bi_body_loader(std::ostream& stream, const std::string&, const std::shared_ptr<Parser::Object>&, LoaderContext&)
+// {
+//     stream << " let work_info = get_work_info();" << std::endl;
+//     stream << "  let film_width = work_info.width;" << std::endl;
+//     stream << "  let film_height = work_info.height;" << std::endl;
+//     stream << "  let max_depth_light = 5;" << std::endl;
+//     stream << "  let buf_size = film_width * film_height * max_depth_light * 16;" << std::endl;
+//     stream << "  let buf = device.request_buffer(\"bi\", buf_size, 0);" << std::endl;
+//     stream << "  let technique = make_light_renderer(buf, max_depth_light);" << std::endl;
+// }
 
 static void debug_body_loader(std::ostream& stream, const std::string&, const std::shared_ptr<Parser::Object>&, LoaderContext&)
 {
@@ -201,7 +201,7 @@ static void ib_header_loader(std::ostream& stream, const std::string&, const std
 
 /////////////////////////
 
-static TechniqueInfo path_get_info(const std::string&, const std::shared_ptr<Parser::Object>& technique, const LoaderContext& ctx)
+static TechniqueInfo bi_get_info(const std::string&, const std::shared_ptr<Parser::Object>& technique, const LoaderContext& ctx)
 {
     TechniqueInfo info;
 
@@ -288,9 +288,9 @@ static TechniqueInfo path_get_info(const std::string&, const std::shared_ptr<Par
 
     info.Variants[1].OverrideCameraGenerator = light_camera;
     info.Variants[1].LockFramebuffer = true;
-    info.Variants[1].EmitterPayloadInitializer = "make_pt_emitter_payload_initializer";
+    info.Variants[1].EmitterPayloadInitializer = "make_bi_emitter_payload_initializer";
     info.Variants[0].UsesLights = true;
-    info.Variants[0].EmitterPayloadInitializer = "make_pt_emitter_payload_initializer";
+    info.Variants[0].EmitterPayloadInitializer = "make_bi_emitter_payload_initializer";
     info.Variants[0].ShadowHandlingMode = ShadowHandlingMode::AdvancedWithMaterials;
 
     // if (ctx.Denoiser.Enabled)
@@ -299,7 +299,7 @@ static TechniqueInfo path_get_info(const std::string&, const std::shared_ptr<Par
     return info;
 }
 
-static void path_body_loader(std::ostream& stream, const std::string&, const std::shared_ptr<Parser::Object>& technique, LoaderContext& ctx)
+static void bi_body_loader(std::ostream& stream, const std::string&, const std::shared_ptr<Parser::Object>& technique, LoaderContext& ctx)
 {
     if (handle_ib_body(stream, technique, ctx))
         return;
@@ -341,13 +341,13 @@ static void path_body_loader(std::ostream& stream, const std::string&, const std
 
         ShadingTree tree(ctx);
         stream << ctx.Lights->generateLightSelector(ls, tree);
-        stream << "  let technique = make_path_renderer(" << max_depth << ", light_selector, aovs, buf, buf_camera, max_depth_light);" << std::endl;
+        stream << "  let technique = make_bi_renderer(" << max_depth << ", light_selector, aovs, buf, buf_camera, max_depth_light);" << std::endl;
     }else{
         stream << "  let technique = make_light_renderer(buf, max_depth_light);" << std::endl;
     }
 }
 
-static void path_header_loader(std::ostream& stream, const std::string&, const std::shared_ptr<Parser::Object>&, const LoaderContext& ctx)
+static void bi_header_loader(std::ostream& stream, const std::string&, const std::shared_ptr<Parser::Object>&, const LoaderContext& ctx)
 {
     if (handle_ib_header(stream, ctx))
         return;
@@ -355,6 +355,64 @@ static void path_header_loader(std::ostream& stream, const std::string&, const s
     constexpr int C = 1 /* MIS */ + 3 /* Contrib */ + 1 /* Depth */ + 1 /* Eta */;
     stream << "static RayPayloadComponents = " << C << ";" << std::endl
            << "fn init_raypayload() = init_vpt_raypayload();" << std::endl;
+}
+
+/////////////////////////
+
+static TechniqueInfo path_get_info(const std::string&, const std::shared_ptr<Parser::Object>& technique, const LoaderContext& ctx)
+{
+    TechniqueInfo info;
+
+    // Check if we have a proper defined technique
+    // It is totally fine to only define the type by other means then the scene config
+    if (technique) {
+        if (technique->property("aov_mis").getBool(false)) {
+            info.EnabledAOVs.emplace_back("Direct Weights");
+            info.EnabledAOVs.emplace_back("NEE Weights");
+            info.Variants[0].ShadowHandlingMode = ShadowHandlingMode::Advanced;
+        }
+    }
+
+    info.Variants[0].UsesLights                = true;
+    info.Variants[0].EmitterPayloadInitializer = "make_pt_emitter_payload_initializer";
+
+    if (ctx.Denoiser.Enabled)
+        enable_ib(info, !ctx.Denoiser.OnlyFirstIteration);
+
+    return info;
+}
+
+static void path_body_loader(std::ostream& stream, const std::string&, const std::shared_ptr<Parser::Object>& technique, LoaderContext& ctx)
+{
+    if (handle_ib_body(stream, technique, ctx))
+        return;
+
+    const int max_depth     = technique ? technique->property("max_depth").getInteger(64) : 64;
+    const float clamp_value = technique ? technique->property("clamp").getNumber(0) : 0; // Allow clamping of contributions
+    const std::string ls    = technique ? technique->property("light_selector").getString(DefaultLightSelector) : DefaultLightSelector;
+    const bool hasMISAOV    = technique ? technique->property("aov_mis").getBool(false) : false;
+
+    if (hasMISAOV) {
+        stream << "  let aov_di  = device.load_aov_image(\"Direct Weights\", spi); aov_di.mark_as_used();" << std::endl;
+        stream << "  let aov_nee = device.load_aov_image(\"NEE Weights\", spi); aov_nee.mark_as_used();" << std::endl;
+    }
+
+    stream << "  let aovs = @|id:i32| -> AOVImage {" << std::endl
+           << "    match(id) {" << std::endl;
+
+    if (hasMISAOV) {
+        stream << "      1 => aov_di," << std::endl
+               << "      2 => aov_nee," << std::endl;
+    }
+
+    stream << "      _ => make_empty_aov_image()" << std::endl
+           << "    }" << std::endl
+           << "  };" << std::endl;
+
+    ShadingTree tree(ctx);
+    stream << ctx.Lights->generateLightSelector(ls, tree);
+
+    stream << "  let technique = make_path_renderer(" << max_depth << ", light_selector, aovs, " << clamp_value << ");" << std::endl;
 }
 
 /////////////////////////
@@ -552,6 +610,7 @@ static const struct TechniqueEntry {
     TechniqueBodyLoader BodyLoader;
 } _generators[] = {
     { "ao", technique_empty_get_info, ao_body_loader },
+    { "bi", bi_get_info, bi_body_loader },
     { "path", path_get_info, path_body_loader },
     { "volpath", volpath_get_info, volpath_body_loader },
     { "debug", debug_get_info, debug_body_loader },

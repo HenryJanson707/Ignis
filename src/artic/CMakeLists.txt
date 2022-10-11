@@ -82,6 +82,7 @@ set(ARTIC_EXTRA_SRC
     ${CMAKE_CURRENT_SOURCE_DIR}/impl/technique/infobuffer.art
     ${CMAKE_CURRENT_SOURCE_DIR}/impl/technique/pathtracer.art
     ${CMAKE_CURRENT_SOURCE_DIR}/impl/technique/bitracer.art
+    ${CMAKE_CURRENT_SOURCE_DIR}/impl/technique/lighttracer.art
     ${CMAKE_CURRENT_SOURCE_DIR}/impl/technique/photonmapper.art
     ${CMAKE_CURRENT_SOURCE_DIR}/impl/technique/volpathtracer.art
     ${CMAKE_CURRENT_SOURCE_DIR}/impl/technique/wireframe.art
