@@ -55,6 +55,18 @@ fn @sample_uniform_sphere(u: f32, v: f32) -> DirSample {
     make_dir_sample(c, s, phi, uniform_sphere_pdf())
 }
 
+// Probability density function for uniform sphere sampling
+fn @uniform_hemisphere_pdf() = 1 / (2 * flt_pi);
+
+// Samples a direction uniformly on a sphere
+fn @sample_uniform_hemisphere(u: f32, v: f32) -> DirSample {
+    let c = math_builtins::fabs(2 * v - 1);
+    let s = safe_sqrt(1 - c * c);
+    let phi = 2 * flt_pi * u;
+    make_dir_sample(c, s, phi, uniform_hemisphere_pdf())
+}
+
+
 // Probability density function for equal area sphere sampling
 // Note: Keep in mind this is essentially the same as uniform_sphere, but a bit faster
 fn @equal_area_sphere_pdf() = uniform_sphere_pdf();
