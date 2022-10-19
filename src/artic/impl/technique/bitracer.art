@@ -72,7 +72,7 @@ fn @make_bi_renderer(max_path_len: i32, light_selector: LightSelector, aovs: AOV
     let offset : f32  = 0.001;
 
     // let (film_width, film_height) = device.get_film_size();
-    // let buf_size = film_width * film_height * max_path_len * 16;
+    // let buf_size = film_width * film_height * max_path_len * vertex_size;
     // let camera_buf = device.request_buffer("camera_path", buf_size, 0);
     // let aov_stats  = @aovs(AOV_PATH_STATS);
      
@@ -144,11 +144,11 @@ fn @make_bi_renderer(max_path_len: i32, light_selector: LightSelector, aovs: AOV
     //wrong because we need both materials!!
     //Check this!!
     fn MISWeightS0(camBuf: DeviceBuffer, lightBuf: DeviceBuffer, pixel:i32, t:i32, pdfLightpick: f32, light_pdf : EmissivePdf) -> f32{
-        //The current size of one data point is 16 bytes (valid: i32 (0, 1): 0, material: i32: 1, pdfFwd: f32 : 2, pdfRev: f32: 3, pos: vec3 : 4, normal: vec3 : 7, beta: vec3 : 10, wo: vec3 : 13)
-        let startCamBuff = 16 * pixel * max_path_len;
-        let startLightBuf = 16 * pixel * max_path_len_light;
-        let mut pt = if t > 0 {load_vertex(camBuf, startCamBuff + 16 * (t-1))} else {make_empty_Vertex()};
-        let mut ptMinus = if t > 1 {load_vertex(camBuf, startCamBuff + 16 * (t-2))} else {make_empty_Vertex()};
+        //The current size of one data point is vertex_size bytes (valid: i32 (0, 1): 0, material: i32: 1, pdfFwd: f32 : 2, pdfRev: f32: 3, pos: vec3 : 4, normal: vec3 : 7, beta: vec3 : 10, wo: vec3 : 13)
+        let startCamBuff = vertex_size * pixel * max_path_len;
+        let startLightBuf = vertex_size * pixel * max_path_len_light;
+        let mut pt = if t > 0 {load_vertex(camBuf, startCamBuff + vertex_size * (t-1))} else {make_empty_Vertex()};
+        let mut ptMinus = if t > 1 {load_vertex(camBuf, startCamBuff + vertex_size * (t-2))} else {make_empty_Vertex()};
 
         let mut sumRi : f32 = 0.0;
 
@@ -168,17 +168,17 @@ fn @make_bi_renderer(max_path_len: i32, light_selector: LightSelector, aovs: AOV
         //this could be wrong???
         let mut i = t-3;
         while i > 1{
-            ri *= safe_div(load_vertex_pdfRev(camBuf, startCamBuff + 16 * i), load_vertex_pdfFwd(camBuf, startCamBuff + 16 * i));
+            ri *= safe_div(load_vertex_pdfRev(camBuf, startCamBuff + vertex_size * i), load_vertex_pdfFwd(camBuf, startCamBuff + vertex_size * i));
             sumRi += ri;
             i -= 1;
         }
         
         // for i in range_step(t-3, 1, -1){
         //     //this just seems wrong
-        //     //ri *= camBuf.load_f32(startCamBuff + 16 * i + 3) / camBuf.load_f32(startCamBuff + 16 * i + 2);
+        //     //ri *= camBuf.load_f32(startCamBuff + vertex_size * i + 3) / camBuf.load_f32(startCamBuff + vertex_size * i + 2);
         //     //This is most likly wrong
         //     print_i32(i);
-        //     ri *= load_vertex_pdfRev(camBuf, startCamBuff + 16 * i) / load_vertex_pdfFwd(camBuf, startCamBuff + 16 * i);
+        //     ri *= load_vertex_pdfRev(camBuf, startCamBuff + vertex_size * i) / load_vertex_pdfFwd(camBuf, startCamBuff + vertex_size * i);
         //     sumRi += ri;
         // }
 
@@ -187,11 +187,11 @@ fn @make_bi_renderer(max_path_len: i32, light_selector: LightSelector, aovs: AOV
     //wrong because we need both materials!!
     //Check this!!
     fn MISWeightS1(camBuf: DeviceBuffer, lightBuf: DeviceBuffer, pixel:i32, t:i32, light_pdf : EmissivePdf, mat: Material, sampled: Vertex) -> f32{
-        //The current size of one data point is 16 bytes (valid: i32 (0, 1): 0, material: i32: 1, pdfFwd: f32 : 2, pdfRev: f32: 3, pos: vec3 : 4, normal: vec3 : 7, beta: vec3 : 10, wo: vec3 : 13)
-        let startCamBuff = 16 * pixel * max_path_len;
-        let startLightBuf = 16 * pixel * max_path_len_light;
-        let mut pt = if t > 0 {load_vertex(camBuf, startCamBuff + 16 * (t-1))} else {make_empty_Vertex()};
-        let mut ptMinus = if t > 1 {load_vertex(camBuf, startCamBuff + 16 * (t-2))} else {make_empty_Vertex()};
+        //The current size of one data point is vertex_size bytes (valid: i32 (0, 1): 0, material: i32: 1, pdfFwd: f32 : 2, pdfRev: f32: 3, pos: vec3 : 4, normal: vec3 : 7, beta: vec3 : 10, wo: vec3 : 13)
+        let startCamBuff = vertex_size * pixel * max_path_len;
+        let startLightBuf = vertex_size * pixel * max_path_len_light;
+        let mut pt = if t > 0 {load_vertex(camBuf, startCamBuff + vertex_size * (t-1))} else {make_empty_Vertex()};
+        let mut ptMinus = if t > 1 {load_vertex(camBuf, startCamBuff + vertex_size * (t-2))} else {make_empty_Vertex()};
         let qs = sampled;
 
         let mut sumRi : f32 = 0.0;
@@ -213,16 +213,16 @@ fn @make_bi_renderer(max_path_len: i32, light_selector: LightSelector, aovs: AOV
         //this could be wrong???
         let mut i = t-3;
         while i > 1{
-            ri *= safe_div(load_vertex_pdfRev(camBuf, startCamBuff + 16 * i), load_vertex_pdfFwd(camBuf, startCamBuff + 16 * i));
+            ri *= safe_div(load_vertex_pdfRev(camBuf, startCamBuff + vertex_size * i), load_vertex_pdfFwd(camBuf, startCamBuff + vertex_size * i));
             sumRi += ri;
             i -= 1;
         }
 
         // for i in range_step(t-3, 1, -1){
         //     //this just seems wrong
-        //     //ri *= camBuf.load_f32(startCamBuff + 16 * i + 3) / camBuf.load_f32(startCamBuff + 16 * i + 2);
+        //     //ri *= camBuf.load_f32(startCamBuff + vertex_size * i + 3) / camBuf.load_f32(startCamBuff + vertex_size * i + 2);
         //     //This is most likly wrong
-        //     ri *= load_vertex_pdfRev(camBuf, startCamBuff + 16 * i) / load_vertex_pdfFwd(camBuf, startCamBuff + 16 * i);
+        //     ri *= load_vertex_pdfRev(camBuf, startCamBuff + vertex_size * i) / load_vertex_pdfFwd(camBuf, startCamBuff + vertex_size * i);
         //     sumRi += ri;
         // }
 
@@ -237,13 +237,13 @@ fn @make_bi_renderer(max_path_len: i32, light_selector: LightSelector, aovs: AOV
 
     //TODO not all of the varibles are needed make it better
     fn MISWeightCamera(camBuf: DeviceBuffer, lightBuf: DeviceBuffer, pixel:i32, s:i32, t:i32, mat: Material) -> Vec2{
-        let startCamBuff = 16 * pixel * max_path_len;
-        let startLightBuf = 16 * pixel * max_path_len_light;
-        // let current_buf_pos = buf_pos + pt.depth * 16;
-        let mut qs = load_vertex(lightBuf, startLightBuf + 16 * (s-1));
-        let mut pt = if t > 0 {load_vertex(camBuf, startCamBuff + 16 * (t-1))} else {make_empty_Vertex()};
-        let mut qsMinus = load_vertex(lightBuf, startLightBuf + 16 * (s-2));
-        let mut ptMinus = if t > 1 {load_vertex(camBuf, startCamBuff + 16 * (t-2))} else {make_empty_Vertex()};
+        let startCamBuff = vertex_size * pixel * max_path_len;
+        let startLightBuf = vertex_size * pixel * max_path_len_light;
+        // let current_buf_pos = buf_pos + pt.depth * vertex_size;
+        let mut qs = load_vertex(lightBuf, startLightBuf + vertex_size * (s-1));
+        let mut pt = if t > 0 {load_vertex(camBuf, startCamBuff + vertex_size * (t-1))} else {make_empty_Vertex()};
+        let mut qsMinus = load_vertex(lightBuf, startLightBuf + vertex_size * (s-2));
+        let mut ptMinus = if t > 1 {load_vertex(camBuf, startCamBuff + vertex_size * (t-2))} else {make_empty_Vertex()};
 
         let mut ri1 : f32 = 0.0;
 
@@ -263,13 +263,13 @@ fn @make_bi_renderer(max_path_len: i32, light_selector: LightSelector, aovs: AOV
 
     //TODO not all of the varibles are needed make it better
     fn MISWeight(camBuf: DeviceBuffer, lightBuf: DeviceBuffer, pixel:i32, s:i32, t:i32, mat: Material, contri: f32, current_ri: Vec2) -> f32{ //the contri is only
-        let startCamBuff = 16 * pixel * max_path_len;
-        let startLightBuf = 16 * pixel * max_path_len_light;
-        // let current_buf_pos = buf_pos + pt.depth * 16;
-        let mut qs = load_vertex(lightBuf, startLightBuf + 16 * (s-1));
-        let mut pt = if t > 0 {load_vertex(camBuf, startCamBuff + 16 * (t-1))} else {make_empty_Vertex()};
-        let mut qsMinus = load_vertex(lightBuf, startLightBuf + 16 * (s-2));
-        let mut ptMinus = if t > 1 {load_vertex(camBuf, startCamBuff + 16 * (t-2))} else {make_empty_Vertex()};
+        let startCamBuff = vertex_size * pixel * max_path_len;
+        let startLightBuf = vertex_size * pixel * max_path_len_light;
+        // let current_buf_pos = buf_pos + pt.depth * vertex_size;
+        let mut qs = load_vertex(lightBuf, startLightBuf + vertex_size * (s-1));
+        let mut pt = if t > 0 {load_vertex(camBuf, startCamBuff + vertex_size * (t-1))} else {make_empty_Vertex()};
+        let mut qsMinus = load_vertex(lightBuf, startLightBuf + vertex_size * (s-2));
+        let mut ptMinus = if t > 1 {load_vertex(camBuf, startCamBuff + vertex_size * (t-2))} else {make_empty_Vertex()};
 
         let mut sumRi : f32 = 0.0;
 
@@ -288,16 +288,16 @@ fn @make_bi_renderer(max_path_len: i32, light_selector: LightSelector, aovs: AOV
         let mut i = t-3;
         //this could be wrong???
         while i > 1{
-            ri *= safe_div(load_vertex_pdfRev(camBuf, startCamBuff + 16 * i), load_vertex_pdfFwd(camBuf, startCamBuff + 16 * i)); //Extra check here
+            ri *= safe_div(load_vertex_pdfRev(camBuf, startCamBuff + vertex_size * i), load_vertex_pdfFwd(camBuf, startCamBuff + vertex_size * i)); //Extra check here
             sumRi += ri;
             i -= 1;
         }
 
         // for i in range_step(t-3, 1, -1){
         //     //this just seems wrong
-        //     //ri *= camBuf.load_f32(startCamBuff + 16 * i + 3) / camBuf.load_f32(startCamBuff + 16 * i + 2);
+        //     //ri *= camBuf.load_f32(startCamBuff + vertex_size * i + 3) / camBuf.load_f32(startCamBuff + vertex_size * i + 2);
         //     //This is most likly wrong
-        //     ri *= load_vertex_pdfRev(camBuf, startCamBuff + 16 * i) / load_vertex_pdfFwd(camBuf, startCamBuff + 16 * i);
+        //     ri *= load_vertex_pdfRev(camBuf, startCamBuff + vertex_size * i) / load_vertex_pdfFwd(camBuf, startCamBuff + vertex_size * i);
         //     sumRi += ri;
         // }
 
@@ -321,7 +321,7 @@ fn @make_bi_renderer(max_path_len: i32, light_selector: LightSelector, aovs: AOV
         //this could be wrong???
         //the NaN is here!!!!!!!!
         while i > -1{
-            ri *= safe_div(load_vertex_pdfRev(lightBuf, startLightBuf + 16 * i), load_vertex_pdfFwd(lightBuf, startLightBuf + 16 * i)); //Extra check here
+            ri *= safe_div(load_vertex_pdfRev(lightBuf, startLightBuf + vertex_size * i), load_vertex_pdfFwd(lightBuf, startLightBuf + vertex_size * i)); //Extra check here
             sumRi += ri;
             i -= 1;
         }
@@ -335,9 +335,9 @@ fn @make_bi_renderer(max_path_len: i32, light_selector: LightSelector, aovs: AOV
         // for i in range_step(t-3, -1, -1){
         //     //this just seems wrong 
         //     //there might be a mistake here because of the case 0
-        //     //ri *= lightBuf.load_f32(startLightBuf + 16 * i + 3) / lightBuf.load_f32(startLightBuf + 16 * i + 2);
+        //     //ri *= lightBuf.load_f32(startLightBuf + vertex_size * i + 3) / lightBuf.load_f32(startLightBuf + vertex_size * i + 2);
         //     //This is most likly wrong
-        //     ri *= load_vertex_pdfRev(lightBuf, startLightBuf + 16 * i) / load_vertex_pdfFwd(lightBuf, startLightBuf + 16 * i); //Extra check here
+        //     ri *= load_vertex_pdfRev(lightBuf, startLightBuf + vertex_size * i) / load_vertex_pdfFwd(lightBuf, startLightBuf + vertex_size * i); //Extra check here
         //     sumRi += ri;
         // }
 
@@ -367,8 +367,8 @@ fn @make_bi_renderer(max_path_len: i32, light_selector: LightSelector, aovs: AOV
             return(ShadowRay::None)
         }
 
-        let light_buf_pos  = 16 * pixel * max_path_len_light;
-        let camera_buf_pos = 16 * pixel * max_path_len;
+        let light_buf_pos  = vertex_size * pixel * max_path_len_light;
+        let camera_buf_pos = vertex_size * pixel * max_path_len;
 
         let light_path_len = load_vertex_valid(buf, light_buf_pos);
 
@@ -502,11 +502,11 @@ fn @make_bi_renderer(max_path_len: i32, light_selector: LightSelector, aovs: AOV
             let camera_wo = vec3_neg(ray.dir);
             let camera_beta = pt.contrib;
 
-            let light_buf_pos_corrected = light_buf_pos + 16 * (s - 1);
+            let light_buf_pos_corrected = light_buf_pos + vertex_size * (s - 1);
 
             //TODO importently not all values here are needed delete the rest, aspschly for the Light ones
             let light_vertex = load_vertex(buf, light_buf_pos_corrected);
-            //The current size of one data point is 16 bytes (valid: i32 (0, 1): 0, material: i32: 1, pdfFwd: f32 : 2, pdfRev: f32: 3, pos: vec3 : 4, normal: vec3 : 7, beta: vec3 : 10, wo: vec3 : 13)
+            //The current size of one data point is vertex_size bytes (valid: i32 (0, 1): 0, material: i32: 1, pdfFwd: f32 : 2, pdfRev: f32: 3, pos: vec3 : 4, normal: vec3 : 7, beta: vec3 : 10, wo: vec3 : 13)
             //TODO importently not all values here are needed delete the rest, aspschly for the Light ones
             let light_pos = light_vertex.pos;
             let light_normal = light_vertex.normal;
@@ -606,8 +606,8 @@ fn @make_bi_renderer(max_path_len: i32, light_selector: LightSelector, aovs: AOV
         , color: Color) -> Option[Color] {
             let secondary = unwrap_secondarypayload(payload);
             if secondary.s > 1{
-                let light_buf_pos  = 16 * pixel * max_path_len_light;
-                let light_buf_pos_corrected = light_buf_pos + 16 * (secondary.s - 1);
+                let light_buf_pos  = vertex_size * pixel * max_path_len_light;
+                let light_buf_pos_corrected = light_buf_pos + vertex_size * (secondary.s - 1);
 
                 let light_vertex = load_vertex(buf, light_buf_pos_corrected);
                 //TODO wo is wrong???? TODO change this
@@ -670,7 +670,7 @@ fn @make_bi_renderer(max_path_len: i32, light_selector: LightSelector, aovs: AOV
         // }
 
         let wo = vec3_neg(ray.dir);
-        let buf_pos = 16 * pixel * max_path_len;
+        let buf_pos = vertex_size * pixel * max_path_len;
 
         let beta = pt.contrib;
         //it need to retestet if the first pdfFwd = 1.0 ist!!!
@@ -681,8 +681,8 @@ fn @make_bi_renderer(max_path_len: i32, light_selector: LightSelector, aovs: AOV
         //     return(Option[(Ray, RayPayload)]::None)
         // }
         
-        let current_buf_pos = buf_pos + pt.depth * 16;
-        let prev_buf_pos = buf_pos + (pt.depth - 1) * 16;
+        let current_buf_pos = buf_pos + pt.depth * vertex_size;
+        let prev_buf_pos = buf_pos + (pt.depth - 1) * vertex_size;
 
         let current_pos = surf.point;
         let current_normal = surf.face_normal;
@@ -695,7 +695,7 @@ fn @make_bi_renderer(max_path_len: i32, light_selector: LightSelector, aovs: AOV
 
         //TODO this seems to be a wrong way of handeling this problem
 
-        //The current size of one data point is 16 bytes (valid: i32 (0, 1): 0, material: i32: 1, pdfFwd: f32 : 2, pdfRev: f32: 3, pos: vec3 : 4, normal: vec3 : 7, beta: vec3 : 10, wo: vec3 : 13)
+        //The current size of one data point is vertex_size bytes (valid: i32 (0, 1): 0, material: i32: 1, pdfFwd: f32 : 2, pdfRev: f32: 3, pos: vec3 : 4, normal: vec3 : 7, beta: vec3 : 10, wo: vec3 : 13)
         
         let current_vertex = Vertex {
             valid =      1,
@@ -791,8 +791,8 @@ fn @make_bi_renderer(max_path_len: i32, light_selector: LightSelector, aovs: AOV
             return(Option[Ray]::None)
         }
 
-        let buf_pos = 16 * pixel * max_path_len;
-        let prev_buf_pos = buf_pos + (pt.depth - 1) * 16;
+        let buf_pos = vertex_size * pixel * max_path_len;
+        let prev_buf_pos = buf_pos + (pt.depth - 1) * vertex_size;
 
         //print_i32(pt.depth);
         // aov_stats.splat(pixel, make_color(if pt.depth == 1 { 2 } else { 1 }, 0, 0));
