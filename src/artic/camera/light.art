@@ -1,0 +1,51 @@
+fn @make_light_camera(tmin: f32, tmax: f32, w: f32, h: f32, buf: DeviceBuffer, light_selector: LightSelector, max_path_len: i32){
+    Camera {
+        differential = @ |_| {//TODO this is wrong!!!!
+            (
+                make_vec3(0,0,0),
+                make_vec3(0,0,0)
+            )
+        },
+        generate_ray = @ |rnd, coord| {
+            let pixel = coord.linear;
+
+            let (light, light_select_pdf) = light_selector.sample(rnd, make_vec3(0,0,0)); //we have no position here
+            let sample_emission = light.sample_emission;
+            let light_sample    = @sample_emission(rnd);
+
+            let pdfFwd          = light_sample.pdf_area * light_select_pdf; 
+            let pdfFwd2         = light_sample.pdf_dir;
+            let cos_light       = light_sample.cos;
+            let pdfRev : f32    = 0.0;
+            let pdf             = safe_div(cos_light, light_select_pdf); //TODO this could be a problem we dont know which valuse are useed in Light Intensity
+            let pos             = light_sample.pos;
+            let intensity       = light_sample.intensity;
+            let beta            = color_mulf(intensity, pdf);
+            let wo              = make_vec3(0, 0, 0); //This should be fine because its s=1 wich never is called
+            let dir             = light_sample.dir;
+            let normal          = dir; //check if this is fine???
+
+            let current_pos     = pixel * 16 * max_path_len;
+            let next_pos        = pixel * 16 * max_path_len + 16;
+            // if pixel == 234551{
+            //     print_string("Light");
+            //     print_string("\n");
+            //     print_f32(cos_light);
+            //     print_string("\n");
+            //     print_f32(light_sample.pdf_dir);
+            //     print_string("\n");
+            //     print_f32(pdf);
+            //     print_string("\n");
+            //     print_f32(beta.x);
+            //     print_string("\n");
+            //     print_flush();
+            // }
+            //The current size of one data point is 16 bytes (valid: i32 (0, 1): 0, material: i32: 1, pdfFwd: f32 : 2, pdfRev: f32: 3, pos: vec3 : 4, normal: vec3 : 7, beta: vec3 : 10, wo: vec3 : 13)
+            store_vertex_data(buf, current_pos, 0, -1, pdfFwd, pdfRev, pos, normal, intensity, wo);
+            
+            store_vertex_pdfFwd(buf, next_pos, pdfFwd2);
+            store_vertex_Beta(buf, next_pos, beta);
+            make_ray(pos, dir, tmin, tmax, ray_flag_camera)
+        }
+    }
+}

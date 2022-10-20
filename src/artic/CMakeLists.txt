@@ -13,6 +13,7 @@ set(ARTIC_MAIN_SRC
     ${CMAKE_CURRENT_SOURCE_DIR}/bsdf/tensortree.art
     ${CMAKE_CURRENT_SOURCE_DIR}/camera/common.art
     ${CMAKE_CURRENT_SOURCE_DIR}/camera/fishlens.art
+    ${CMAKE_CURRENT_SOURCE_DIR}/camera/light.art
     ${CMAKE_CURRENT_SOURCE_DIR}/camera/orthogonal.art
     ${CMAKE_CURRENT_SOURCE_DIR}/camera/perspective.art
     ${CMAKE_CURRENT_SOURCE_DIR}/core/bbox.art
@@ -33,6 +34,7 @@ set(ARTIC_MAIN_SRC
     ${CMAKE_CURRENT_SOURCE_DIR}/core/sort.art
     ${CMAKE_CURRENT_SOURCE_DIR}/core/stats.art
     ${CMAKE_CURRENT_SOURCE_DIR}/core/vector.art
+    ${CMAKE_CURRENT_SOURCE_DIR}/core/vertex.art
     ${CMAKE_CURRENT_SOURCE_DIR}/core/warp.art
     ${CMAKE_CURRENT_SOURCE_DIR}/driver/accumulator.art
     ${CMAKE_CURRENT_SOURCE_DIR}/driver/aov.art
@@ -86,8 +88,10 @@ set(ARTIC_MAIN_SRC
     ${CMAKE_CURRENT_SOURCE_DIR}/shapes/sphere.art
     ${CMAKE_CURRENT_SOURCE_DIR}/shapes/trimesh.art
     ${CMAKE_CURRENT_SOURCE_DIR}/technique/aotracer.art
+    ${CMAKE_CURRENT_SOURCE_DIR}/technique/bitracer.art
     ${CMAKE_CURRENT_SOURCE_DIR}/technique/debugtracer.art
     ${CMAKE_CURRENT_SOURCE_DIR}/technique/infobuffer.art
+    ${CMAKE_CURRENT_SOURCE_DIR}/technique/lighttracer.art
     ${CMAKE_CURRENT_SOURCE_DIR}/technique/lightvisibility.art
     ${CMAKE_CURRENT_SOURCE_DIR}/technique/pathtracer.art
     ${CMAKE_CURRENT_SOURCE_DIR}/technique/photonmapper.art

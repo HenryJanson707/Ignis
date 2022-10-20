@@ -269,6 +269,146 @@ static void volpath_body_loader(std::ostream& stream, const std::string&, const 
 
 /////////////////////////////////
 
+static TechniqueInfo bi_get_info(const std::string&, const std::shared_ptr<Parser::Object>& technique, const LoaderContext& ctx)
+{
+    TechniqueInfo info;
+
+    info.Variants.resize(2);
+
+    // Check if we have a proper defined technique
+    // It is totally fine to only define the type by other means then the scene config
+    // if (technique) {
+    //     if (technique->property("aov_mis").getBool(false)) {
+    //         info.EnabledAOVs.emplace_back("Direct Weights");
+    //         info.EnabledAOVs.emplace_back("NEE Weights");
+    //         info.Variants[0].ShadowHandlingMode = ShadowHandlingMode::Advanced;
+    //     }
+    // }
+
+    // auto variant_selector = [](uint32 i){
+    //     return (i + 1) % 2; //TODO this is only true if we begin with zero
+    // };
+
+    //You should swap light and pathtracer than this would not be needed!!
+    auto variant_selector = [] (size_t size){
+        std::vector<size_t> ret(2);
+        ret.at(0) = 1;
+        ret.at(1) = 0;
+        return ret;
+    };
+
+    info.VariantSelector = variant_selector;
+
+    auto light_camera = [] (LoaderContext& ctx){
+        std::stringstream stream;
+        
+        stream << RayGenerationShader::begin(ctx) << std::endl;
+        stream << ShaderUtils::generateDatabase(ctx) << std::endl;
+
+        ShadingTree tree(ctx);
+        stream << ctx.Lights->generate(tree, false) << std::endl;
+        stream << ctx.Lights->generateLightSelector("", tree);
+
+        stream << "  let film_width = settings.width;" << std::endl;
+        stream << "  let film_height = settings.height;" << std::endl;
+        stream << "  let spi = " << ShaderUtils::inlineSPI(ctx) << ";" << std::endl;
+        stream << "  let spp = " << ctx.SamplesPerIteration << " : i32;" << std::endl;
+        //The Buffer Size is far too big!!
+        stream << "  let max_depth_light = 5;" << std::endl;
+        stream << "  let buf_size = film_width * film_height * max_depth_light * 16;" << std::endl; //TODO Find a better to set a max depth
+        stream << "  let buf = device.request_buffer(\"bi\", buf_size, 0);" << std::endl;
+        stream << "  let offset:f32 = 0.001;" << std::endl; //TODO find a better way to define this
+        stream << "  let camera = make_light_camera(" << std::endl;
+        stream << "     offset," << std::endl;
+        stream << "     flt_max," << std::endl;
+        stream << "     film_width as f32," << std::endl;
+        stream << "     film_height as f32," << std::endl;
+        stream << "     buf," << std::endl;
+        stream << "     light_selector,"  << std::endl;
+        stream << "     max_depth_light);" << std::endl;//TODO Find a better to set a max depth
+
+        std::string pixel_sampler = "make_uniform_pixel_sampler()";
+        if (ctx.PixelSamplerType == "halton") {
+            stream << "  let halton_setup = setup_halton_pixel_sampler(device, settings.width, settings.height, settings.iter, xmin, ymin, xmax, ymax);" << std::endl;
+            pixel_sampler = "make_halton_pixel_sampler(halton_setup)";
+        } else if (ctx.PixelSamplerType == "mjitt") {
+            pixel_sampler = "make_mjitt_pixel_sampler(4, 4)";
+        }
+
+        stream << "  let emitter = make_camera_emitter(camera, settings.iter, spi, " << pixel_sampler << ", " << ctx.CurrentTechniqueVariantInfo().GetEmitterPayloadInitializer() << ");" << std::endl;
+        // stream << "  let emitter = make_camera_emitter(camera, settings.iter, spp, make_uniform_pixel_sampler()/*make_mjitt_pixel_sampler(4,4)*/, init_raypayload);" << std::endl;
+        
+        stream << RayGenerationShader::end() << std::endl;
+
+        return stream.str();
+    };
+
+
+    info.Variants[1].OverrideCameraGenerator = light_camera;
+    info.Variants[1].LockFramebuffer = true;
+    info.Variants[1].EmitterPayloadInitializer = "make_simple_payload_initializer(init_biraypayload)";
+    info.Variants[1].PrimaryPayloadCount = 8;
+
+    info.Variants[0].UsesLights = true;
+    info.Variants[0].EmitterPayloadInitializer = "make_simple_payload_initializer(init_biraypayload)";
+    info.Variants[0].ShadowHandlingMode = ShadowHandlingMode::AdvancedWithMaterials;
+    info.Variants[0].PrimaryPayloadCount = 8;
+    info.Variants[0].SecondaryPayloadCount = 12; // Warum 12, nur 10 werden genutzt?
+
+    // if (ctx.Denoiser.Enabled)
+    //     enable_ib(info, !ctx.Denoiser.OnlyFirstIteration);
+
+    return info;
+}
+
+static void bi_body_loader(std::ostream& stream, const std::string&, const std::shared_ptr<Parser::Object>& technique, LoaderContext& ctx)
+{
+    if (handle_ib_body(stream, technique, ctx))
+        return;
+
+    stream << "  let film_width = settings.width;" << std::endl;
+    stream << "  let film_height = settings.height;" << std::endl;
+    stream << "  let max_depth_light = 5;" << std::endl;
+    stream << "  let buf_size = film_width * film_height * max_depth_light * 16;" << std::endl;
+    stream << "  let buf = device.request_buffer(\"bi\", buf_size, 0);" << std::endl;
+
+    const int max_depth     = technique ? technique->property("max_depth").getInteger(64) : 64;
+    const float clamp_value = technique ? technique->property("clamp").getNumber(0) : 0; // Allow clamping of contributions
+    const std::string ls    = technique ? technique->property("light_selector").getString(DefaultLightSelector) : DefaultLightSelector;
+    const bool hasMISAOV    = technique ? technique->property("aov_mis").getBool(false) : false;
+    const bool hasStatsAOV  = technique ? technique->property("aov_stats").getBool(false) : false;
+
+    if(ctx.CurrentTechniqueVariant == 0){
+        stream << "  let buf_size_camera = film_width * film_height * " << max_depth << " * 16;" << std::endl;
+        stream << "  let buf_camera = device.request_buffer(\"camera\", buf_size_camera, 0);" << std::endl;
+        size_t counter = 1;
+        if (hasMISAOV) {
+            stream << "  let aov_di  = device.load_aov_image(\"Direct Weights\", spi); aov_di.mark_as_used();" << std::endl;
+            stream << "  let aov_nee = device.load_aov_image(\"NEE Weights\", spi); aov_nee.mark_as_used();" << std::endl;
+        }
+
+        stream << "  let aovs = @|id:i32| -> AOVImage {" << std::endl
+            << "    match(id) {" << std::endl;
+
+        if (hasMISAOV) {
+            stream << "      1 => aov_di," << std::endl
+                << "      2 => aov_nee," << std::endl;
+        }
+
+        stream << "      _ => make_empty_aov_image()" << std::endl
+            << "    }" << std::endl
+            << "  };" << std::endl;
+
+        ShadingTree tree(ctx);
+        stream << ctx.Lights->generateLightSelector(ls, tree);
+        stream << "  let technique = make_bi_renderer(" << max_depth << ", light_selector, aovs, buf, buf_camera, max_depth_light);" << std::endl;
+    }else{
+        stream << "  let technique = make_light_renderer(buf, max_depth_light);" << std::endl;
+    }
+}
+
+/////////////////////////////////
+
 static std::string ppm_light_camera_generator(LoaderContext& ctx)
 {
     std::stringstream stream;
@@ -418,6 +558,7 @@ static const struct TechniqueEntry {
     TechniqueBodyLoader BodyLoader;
 } _generators[] = {
     { "ao", technique_empty_get_info, ao_body_loader },
+    { "bi", bi_get_info, bi_body_loader },
     { "path", path_get_info, path_body_loader },
     { "volpath", volpath_get_info, volpath_body_loader },
     { "debug", debug_get_info, debug_body_loader },
