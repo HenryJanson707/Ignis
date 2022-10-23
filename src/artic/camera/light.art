@@ -25,8 +25,8 @@ fn @make_light_camera(tmin: f32, tmax: f32, w: f32, h: f32, buf: DeviceBuffer, l
             let dir             = light_sample.dir;
             let normal          = dir; //check if this is fine???
 
-            let current_pos     = pixel * 16 * max_path_len;
-            let next_pos        = pixel * 16 * max_path_len + 16;
+            let current_pos     = pixel * vertex_size * max_path_len;
+            let next_pos        = pixel * vertex_size * max_path_len + vertex_size;
             // if pixel == 234551{
             //     print_string("Light");
             //     print_string("\n");
@@ -40,7 +40,7 @@ fn @make_light_camera(tmin: f32, tmax: f32, w: f32, h: f32, buf: DeviceBuffer, l
             //     print_string("\n");
             //     print_flush();
             // }
-            //The current size of one data point is 16 bytes (valid: i32 (0, 1): 0, material: i32: 1, pdfFwd: f32 : 2, pdfRev: f32: 3, pos: vec3 : 4, normal: vec3 : 7, beta: vec3 : 10, wo: vec3 : 13)
+            //The current size of one data point is vertex_size bytes (valid: i32 (0, 1): 0, material: i32: 1, pdfFwd: f32 : 2, pdfRev: f32: 3, pos: vec3 : 4, normal: vec3 : 7, beta: vec3 : 10, wo: vec3 : 13)
             store_vertex_data(buf, current_pos, 0, -1, pdfFwd, pdfRev, pos, normal, intensity, wo);
             
             store_vertex_pdfFwd(buf, next_pos, pdfFwd2);

@@ -1,3 +1,5 @@
+static vertex_size = 16:i32;
+
 struct Vertex {
     //The current size of one data point is 16 bytes (valid: i32 (0, 1): 0, material: i32: 1, pdfFwd: f32 : 2, pdfRev: f32: 3, pos: vec3 : 4, normal: vec3 : 7, beta: vec3 : 10, wo: vec3 : 13)
     valid:  i32,
