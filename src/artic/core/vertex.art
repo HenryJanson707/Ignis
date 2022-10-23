@@ -1,4 +1,4 @@
-static vertex_size = 16:i32;
+static vertex_size = 20:i32;
 
 struct Vertex {
     //The current size of one data point is 16 bytes (valid: i32 (0, 1): 0, material: i32: 1, pdfFwd: f32 : 2, pdfRev: f32: 3, pos: vec3 : 4, normal: vec3 : 7, beta: vec3 : 10, wo: vec3 : 13)
@@ -9,7 +9,9 @@ struct Vertex {
     pos:    Vec3,
     normal: Vec3,
     beta:   Color,
-    wo:     Vec3
+    wo:     Vec3,
+    isDelta:i32,
+    uv:     Vec3
 }
 
 fn @make_empty_Vertex() -> Vertex{
@@ -21,7 +23,9 @@ fn @make_empty_Vertex() -> Vertex{
        pos =        make_vec3(0.0, 0.0, 0.0),
        normal =     make_vec3(0.0, 0.0, 0.0),
        beta =       make_color(0.0, 0.0, 0.0, 0.0),
-       wo =         make_vec3(0.0, 0.0, 0.0)
+       wo =         make_vec3(0.0, 0.0, 0.0),
+       isDelta =    0,
+       uv =         make_vec3(0.0, 0.0, 0.0)
    } 
 }
 
@@ -32,6 +36,7 @@ fn @load_vertex(buf: DeviceBuffer, bufPos: i32) -> Vertex{
     let second  = buf.load_vec4(bufPos + 4);
     let third   = buf.load_vec4(bufPos + 8);
     let forth   = buf.load_vec4(bufPos + 12);
+    let fifth   = buf.load_vec4(bufPos + 16); 
     
     Vertex {
         valid =     first.x as i32,
@@ -41,7 +46,9 @@ fn @load_vertex(buf: DeviceBuffer, bufPos: i32) -> Vertex{
         pos =       make_vec3(first.y, first.z, first.w),
         normal =    make_vec3(second.y, second.z, second.w),
         beta =      make_color(third.y, third.z, third.w, 1.0),
-        wo =        make_vec3(forth.y, forth.z, forth.w)
+        wo =        make_vec3(forth.y, forth.z, forth.w),
+        isDelta =   fifth.x as i32,
+        uv =        make_vec3(fifth.y, fifth.z, fifth.w)
     }
 }
 
@@ -50,23 +57,27 @@ fn @store_vertex(buf: DeviceBuffer, bufPos: i32, vertex: Vertex){
     let second  = make_vec4(vertex.mat as f32, vertex.normal.x, vertex.normal.y, vertex.normal.z);
     let third   = make_vec4(vertex.pdfFwd, vertex.beta.r, vertex.beta.g, vertex.beta.b);
     let forth   = make_vec4(vertex.pdfRev, vertex.wo.x, vertex.wo.y, vertex.wo.z);
+    let fifth   = make_vec4(vertex.isDelta as f32, vertex.uv.x, vertex.uv.y, vertex.uv.z);
 
     buf.store_vec4(bufPos, first);
     buf.store_vec4(bufPos + 4, second);
     buf.store_vec4(bufPos + 8, third);
     buf.store_vec4(bufPos + 12, forth);
+    buf.store_vec4(bufPos + 16, fifth);
 }
 
-fn @store_vertex_data(buf: DeviceBuffer, bufPos: i32, valid: i32, mat: i32, pdfFwd: f32, pdfRev: f32, pos: Vec3, normal: Vec3, beta: Color, wo: Vec3){
+fn @store_vertex_data(buf: DeviceBuffer, bufPos: i32, valid: i32, mat: i32, pdfFwd: f32, pdfRev: f32, pos: Vec3, normal: Vec3, beta: Color, wo: Vec3, isDelta: i32, uv: Vec3){
     let first   = make_vec4(valid as f32, pos.x, pos.y, pos.z);
     let second  = make_vec4(mat as f32, normal.x, normal.y, normal.z);
     let third   = make_vec4(pdfFwd, beta.r, beta.g, beta.b);
     let forth   = make_vec4(pdfRev, wo.x, wo.y, wo.z);
+    let fifth   = make_vec4(isDelta as f32, uv.x, uv.y, uv.z);
 
     buf.store_vec4(bufPos, first);
     buf.store_vec4(bufPos + 4, second);
     buf.store_vec4(bufPos + 8, third);
     buf.store_vec4(bufPos + 12, forth);
+    buf.store_vec4(bufPos + 16, fifth);
 }
 
 fn @load_vertex_valid(buf: DeviceBuffer, bufPos: i32) -> i32{
@@ -109,6 +120,15 @@ fn @load_vertex_Wo(buf: DeviceBuffer, bufPos: i32) -> Vec3{
     make_vec3(data.y, data.z, data.w)
 }
 
+fn @load_vertex_isDelta(buf: DeviceBuffer, bufPos: i32) -> i32{
+    let data = buf.load_vec4(bufPos + 16);
+    data.x as i32
+}
+
+fn @load_vertex_UV(buf: DeviceBuffer, bufPos: i32) -> Vec3{
+    let data = buf.load_vec4(bufPos + 16);
+    make_vec3(data.y, data.z, data.w)
+}
 
 fn @store_vertex_valid(buf: DeviceBuffer, bufPos: i32, data: i32){
     let old_data = buf.load_vec4(bufPos);
@@ -148,4 +168,14 @@ fn @store_vertex_Beta(buf: DeviceBuffer, bufPos: i32, data: Color){
 fn @store_vertex_Wo(buf: DeviceBuffer, bufPos: i32, data: Vec3){
     let old_data = buf.load_vec4(bufPos + 12);
     buf.store_vec4(bufPos + 12, make_vec4(old_data.x, data.x, data.y, data.z))
+}
+
+fn @store_vertex_isDelta(buf: DeviceBuffer, bufPos: i32, data: f32){
+    let old_data = buf.load_vec4(bufPos + 16);
+    buf.store_vec4(bufPos + 16, make_vec4(data, old_data.y, old_data.z, old_data.z))
+}
+
+fn @store_vertex_UV(buf: DeviceBuffer, bufPos: i32, data: Vec3){
+    let old_data = buf.load_vec4(bufPos + 16);
+    buf.store_vec4(bufPos + 16, make_vec4(old_data.x, data.x, data.y, data.z))
 }

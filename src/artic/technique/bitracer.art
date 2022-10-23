@@ -670,7 +670,13 @@ fn @make_bi_renderer(max_path_len: i32, light_selector: LightSelector, aovs: AOV
 
         let beta = pt.contrib;
         //it need to retestet if the first pdfFwd = 1.0 ist!!!
-        let pdfFwd = if pt.depth == 1 {1.0} else {pt.mis}; //this seems wrong but it could work???? 
+        let mut pdfFwd = if pt.depth == 1 {1.0} else {pt.mis}; //this seems wrong but it could work???? 
+        let mut current_isDelta = 0;
+
+        if mat.bsdf.is_specular{
+            pdfFwd = 0.0;
+            current_isDelta = 1;
+        }
         
         // let rr_prob = russian_roulette_pbrt(color_mulf(pt.contrib, pt.eta * pt.eta), 0.95);
         // if pt.depth + 1 > max_path_len || randf(rnd) >= rr_prob {
@@ -689,6 +695,7 @@ fn @make_bi_renderer(max_path_len: i32, light_selector: LightSelector, aovs: AOV
         //Currently this is wrong because 0 prev_pos is wrong because its not currently known for pt.depth = 0
         let mut correctedFwdPDF = convertDensity(prev_pos, current_pos, current_normal, pdfFwd);
 
+
         //TODO this seems to be a wrong way of handeling this problem
 
         //The current size of one data point is vertex_size bytes (valid: i32 (0, 1): 0, material: i32: 1, pdfFwd: f32 : 2, pdfRev: f32: 3, pos: vec3 : 4, normal: vec3 : 7, beta: vec3 : 10, wo: vec3 : 13)
@@ -701,7 +708,10 @@ fn @make_bi_renderer(max_path_len: i32, light_selector: LightSelector, aovs: AOV
             pos =        current_pos,
             normal =     current_normal,
             beta =       beta,
-            wo =         wo
+            wo =         wo,
+            isDelta =    if mat.bsdf.is_specular {1} else {0},
+            uv =         make_vec3(surf.prim_coords.x, surf.prim_coords.y, 1.0)
+
         };
         store_vertex(camera_buf, current_buf_pos, current_vertex);
         //store_vertex_data(camera_buf, current_buf_pos, 1, -1, correctedFwdPDF, 0.0, current_pos, current_normal, beta, wo);
@@ -810,7 +820,7 @@ fn @make_bi_renderer(max_path_len: i32, light_selector: LightSelector, aovs: AOV
             let prev_normal     = prev_vertex.normal;
 
             let mut correctedRevPDF : f32 = 0.0;
-            let pdfRev = mat.bsdf.pdf(mat_sample.in_dir, wo); //this could be wrong!!!!
+            let pdfRev = if mat.bsdf.is_specular {0.0} else {mat.bsdf.pdf(mat_sample.in_dir, wo)}; //this could be wrong!!!!
 
             if pt.depth != 1{
                 correctedRevPDF = convertDensity(current_pos, prev_pos, prev_normal, pdfRev);
