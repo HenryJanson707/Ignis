@@ -158,6 +158,14 @@ fn @make_bi_renderer(max_path_len: i32, light_selector: LightSelector, aovs: AOV
         if ptMinus.valid != 0 && t - 2 > 1{
             let ptMinusPdfRev = pdfLightEmission(pt, ptMinus, light_pdf);
             ri *= safe_div(ptMinusPdfRev, ptMinus.pdfFwd);
+            // if ptMinus.isDelta == 1{
+            //     print_string("Test1");
+            //     print_string("\n");
+            //     print_f32(ptMinus.pdfFwd);
+            //     print_string("\n");
+            //     print_f32(ptMinusPdfRev);
+            //     print_string("\n");
+            // }
             sumRi += ri;
         }
 
@@ -702,14 +710,14 @@ fn @make_bi_renderer(max_path_len: i32, light_selector: LightSelector, aovs: AOV
         
         let current_vertex = Vertex {
             valid =      1,
-            mat =        -1,
+            mat =        mat.id,
             pdfFwd =     correctedFwdPDF,
             pdfRev =     0.0,
             pos =        current_pos,
             normal =     current_normal,
             beta =       beta,
             wo =         wo,
-            isDelta =    if mat.bsdf.is_specular {1} else {0},
+            isDelta =    current_isDelta,
             uv =         make_vec3(surf.prim_coords.x, surf.prim_coords.y, 1.0)
 
         };
