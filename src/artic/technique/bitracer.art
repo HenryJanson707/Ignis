@@ -217,20 +217,26 @@ fn @make_bi_renderer(max_path_len: i32, light_selector: LightSelector, aovs: AOV
         if pt.valid != 0 && t - 1 > 1{
             let ptPdfRev = pdfLightDirect(qs, pt, light_pdf); //this is most likly wrong 
             ri *= misSaveDiv(ptPdfRev, pt.pdfFwd);
-            sumRi += ri;
+            if ptMinus.isDelta == 0{ // we can just check ptMinus here because pt will allways be non Delta because its definded that way
+                sumRi += ri;
+            }
         }
 
         if ptMinus.valid != 0 && t - 2 > 1{
             let ptMinusPdfRev = pdfConectionGround(pt, qs, ptMinus, mat);
             ri *= misSaveDiv(ptMinusPdfRev, ptMinus.pdfFwd);
-            sumRi += ri;
+            if ptMinus.isDelta == 0 && load_vertex_isDelta(camBuf, startCamBuff + vertex_size * (t-3)) == 0{
+                sumRi += ri;
+            }
         }
 
         //this could be wrong???
         let mut i = t-3;
         while i > 1{
             ri *= misSaveDiv(load_vertex_pdfRev(camBuf, startCamBuff + vertex_size * i), load_vertex_pdfFwd(camBuf, startCamBuff + vertex_size * i));
-            sumRi += ri;
+            if load_vertex_isDelta(camBuf, startCamBuff + vertex_size * i) == 0 && load_vertex_isDelta(camBuf, startCamBuff + vertex_size * (i-1)) == 0{
+                sumRi += ri;
+            }
             i -= 1;
         }
 
@@ -246,6 +252,7 @@ fn @make_bi_renderer(max_path_len: i32, light_selector: LightSelector, aovs: AOV
 
         let qsPdfRev = pdfConectionGround(pt, ptMinus, qs, mat);
         ri *= misSaveDiv(qsPdfRev, qs.pdfFwd);
+        //TODO no check for delta is needed here because delta is set to false for qs
         sumRi += ri;
 
         return(1.0 / (1.0 + sumRi))
@@ -294,18 +301,24 @@ fn @make_bi_renderer(max_path_len: i32, light_selector: LightSelector, aovs: AOV
         if pt.valid != 0 && t - 1 > 1{
             let ptPdfRev = pdfConectionGround(qs, qsMinus, pt, mat); //this is most likly wrong 
             ri *= misSaveDiv(ptPdfRev, pt.pdfFwd);
-            sumRi += ri;
+            if ptMinus.isDelta == 0{ // we can just check ptMinus here because pt will allways be non Delta because its definded that way
+                sumRi += ri;
+            }
         }
         if ptMinus.valid != 0 && t - 2 > 1{
             ri *= current_ri.x;
-            sumRi += ri;
+            if ptMinus.isDelta == 0 && load_vertex_isDelta(camBuf, startCamBuff + vertex_size * (t-3)) == 0{//TODO t-3 should always exist
+                sumRi += ri;
+            }
         }
 
         let mut i = t-3;
         //this could be wrong???
         while i > 1{
             ri *= misSaveDiv(load_vertex_pdfRev(camBuf, startCamBuff + vertex_size * i), load_vertex_pdfFwd(camBuf, startCamBuff + vertex_size * i)); //Extra check here
-            sumRi += ri;
+            if load_vertex_isDelta(camBuf, startCamBuff + vertex_size * i) == 0 && load_vertex_isDelta(camBuf, startCamBuff + vertex_size * (i-1)) == 0{
+                sumRi += ri;
+            }
             i -= 1;
         }
 
@@ -320,12 +333,17 @@ fn @make_bi_renderer(max_path_len: i32, light_selector: LightSelector, aovs: AOV
         ri = 1.0;
         
         ri *= current_ri.y;
-        sumRi += ri;
+        if qsMinus.isDelta == 0{
+            sumRi += ri;
+        }
+
         
 
         let qsMinusPdfRev = pdfConectionGround(qs, pt, qsMinus, mat);
         ri *= misSaveDiv(qsMinusPdfRev, qsMinus.pdfFwd);
-        sumRi += ri;
+        if qsMinus.isDelta == 0 && (s-3 > -1 || (load_vertex_isDelta(lightBuf, startLightBuf + vertex_size * (s-3)) == 0)){//TODO check here
+            sumRi += ri;
+        }
         
         //this is only for debugging
         // if qs.pdfFwd == 0.0 && qs.pos.x != 0.0{
@@ -338,7 +356,9 @@ fn @make_bi_renderer(max_path_len: i32, light_selector: LightSelector, aovs: AOV
         //the NaN is here!!!!!!!!
         while i > -1{
             ri *= misSaveDiv(load_vertex_pdfRev(lightBuf, startLightBuf + vertex_size * i), load_vertex_pdfFwd(lightBuf, startLightBuf + vertex_size * i)); //Extra check here
-            sumRi += ri;
+            if load_vertex_isDelta(lightBuf, startLightBuf + vertex_size * i) == 0 && (i-1 > -1 || (load_vertex_isDelta(lightBuf, startLightBuf + vertex_size * (i-1)) == 0)){//TODO check here
+                sumRi += ri;
+            }
             i -= 1;
         }
         
