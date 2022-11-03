@@ -548,6 +548,7 @@ fn @make_bi_renderer(max_path_len: i32, light_selector: LightSelector, aovs: AOV
             let light_normal = light_vertex.normal;
             let light_beta = light_vertex.beta;
             let light_wi = light_vertex.wo;
+            let light_uv = light_vertex.uv;
 
             let light_dir = vec3_sub(light_pos, camera_pos);
             let light_dist = vec3_len(light_dir);
@@ -568,7 +569,7 @@ fn @make_bi_renderer(max_path_len: i32, light_selector: LightSelector, aovs: AOV
                     face_normal = light_normal,
                     inv_area = 1, //TODO this is wrong but should not matter 
                     prim_coords = make_vec2(0,0),
-                    tex_coords = make_vec2(0,0),
+                    tex_coords = light_uv,
                     local = make_orthonormal_mat3x3(light_normal)
                 };
 
