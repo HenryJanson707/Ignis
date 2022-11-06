@@ -569,7 +569,7 @@ fn @make_bi_renderer(max_path_len: i32, light_selector: LightSelector, aovs: AOV
                     face_normal = light_normal,
                     inv_area = 1, //TODO this is wrong but should not matter 
                     prim_coords = make_vec2(0,0),
-                    tex_coords = light_uv,
+                    tex_coords = make_vec2(light_uv.x, light_uv.y),
                     local = make_orthonormal_mat3x3(light_normal)
                 };
 
@@ -853,7 +853,14 @@ fn @make_bi_renderer(max_path_len: i32, light_selector: LightSelector, aovs: AOV
             if next_pdf == 0.0{
                 return(Option[Ray]::None)
             }
-            let next_contri = color_mul(beta, mat_sample.color); //cos and pdf is already applied
+
+            let mut next_contri = color_mul(beta, mat_sample.color); //cos and pdf is already applied
+
+            let rr_prob = russian_roulette_pbrt(color_mulf(next_contri, pt.eta * pt.eta), 0.95);
+            if randf(rnd) >= rr_prob {
+                return(Option[Ray]::None)
+            }
+            next_contri = color_mulf(next_contri, 1 / rr_prob);
 
             let prev_vertex     = load_vertex(camera_buf, prev_buf_pos);
 
