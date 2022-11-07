@@ -15,7 +15,10 @@ struct DirectLightSample {
     intensity: Color, // Intensity along the direction, already divided by the generating pdf
     pdf:       Pdf,   // Probability to sample the light. If the light is infinite the pdf has to be given in solid angle!
     cos:       f32,   // Cosine between the direction and the light source geometry
-    dist:      f32    // Distance from point of surface towards point on light source
+    dist:      f32,    // Distance from point of surface towards point on light source
+    normal:    Vec3,
+    prim_coords:Vec2,
+    tex_coords:Vec2
 }
 
 // Pdf properties of a light source
@@ -68,7 +71,22 @@ fn @make_direct_sample(pos: Vec3, dir: Vec3, intensity: Color, pdf: Pdf, cos: f3
     intensity = intensity,
     pdf       = pdf,
     cos       = cos,
-    dist      = dist
+    dist      = dist,
+    normal    = make_vec3(0.0, 0.0, 0.0),
+    prim_coords= make_vec2(0.0, 0.0),
+    tex_coords= make_vec2(0.0, 0.0)
+};
+
+fn @make_direct_sample_full(pos: Vec3, dir: Vec3, intensity: Color, pdf: Pdf, cos: f32, dist: f32, normal: Vec3, prim_coords: Vec2, tex_coords: Vec2) = DirectLightSample {
+    pos       = pos,
+    dir       = dir,
+    intensity = intensity,
+    pdf       = pdf,
+    cos       = cos,
+    dist      = dist,
+    normal    = normal,
+    prim_coords= prim_coords,
+    tex_coords = tex_coords
 };
 
 fn @make_emissive_pdf(pdf_area: f32, pdf_dir: f32) = EmissivePdf {

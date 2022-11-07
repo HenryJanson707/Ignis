@@ -444,15 +444,17 @@ fn @make_bi_renderer(max_path_len: i32, light_selector: LightSelector, aovs: AOV
                     let conection_dir = vec3_sub(light_sample.pos, surf.point);
                     let conection_ray = make_ray(light_sample.pos, conection_dir, 0, flt_max, ray_flag_bounce);
 
-                    let light_normal = make_vec3(0.5369, -0.843659, 0.0000); //this is only temporary
+                    let light_normal = light_sample.normal; //this is only temporary
+                    let tex_coords = light_sample.tex_coords;
+                    let prim_coords = light_sample.prim_coords;
 
                     let light_surf = SurfaceElement{
                         is_entering = true,
                         point = light_sample.pos,
                         face_normal = light_normal,
                         inv_area = 1, //TODO this is wrong but should not matter 
-                        prim_coords = make_vec2(0,0),
-                        tex_coords = make_vec2(0,0),
+                        prim_coords = prim_coords,
+                        tex_coords = tex_coords,
                         local = make_orthonormal_mat3x3(light_normal)
                     };
                     
