@@ -71,6 +71,8 @@ fn @make_bi_renderer(max_path_len: i32, light_selector: LightSelector, aovs: AOV
     // let buf_size = film_width * film_height * max_path_len * vertex_size;
     // let camera_buf = device.request_buffer("camera_path", buf_size, 0);
     // let aov_stats  = @aovs(AOV_PATH_STATS);
+    let aov_list = [@aovs(2),@aovs(3),@aovs(4),@aovs(5)]; //this is suboptimal
+    let aov_len = 4; //this is even worse
      
     //Needs tobe checked 
     fn pdfLightDirect(current:Vertex, next:Vertex, light_pdf : EmissivePdf) -> f32{
@@ -519,6 +521,8 @@ fn @make_bi_renderer(max_path_len: i32, light_selector: LightSelector, aovs: AOV
 
                     let mis_contri = color_mulf(contri, mis_choice);
                     
+                    aov_list(1).splat(ctx.pixel, contri);
+
                     write_secondarypayload(secondary_payloads, SecondaryPayload {
                         s=s,
                         t=t,
@@ -644,7 +648,8 @@ fn @make_bi_renderer(max_path_len: i32, light_selector: LightSelector, aovs: AOV
         , payload: RayPayload
         , color: Color) -> Option[Color] {
             let secondary = unwrap_secondarypayload(payload);
-            if secondary.s > 1{
+            let s = secondary.s;
+            if s > 1{
                 let light_buf_pos  = vertex_size * pixel * max_path_len_light;
                 let light_buf_pos_corrected = light_buf_pos + vertex_size * (secondary.s - 1);
 
@@ -677,6 +682,10 @@ fn @make_bi_renderer(max_path_len: i32, light_selector: LightSelector, aovs: AOV
                 let mis = MISWeight(camera_buf, buf, pixel, secondary.s, secondary.t, mat, contri.r, secondary.ri); //the solution could change here because we added s_choice already
 
                 //let mis_choice = mis * s_choice_pdf; s_choice is already in color!!!
+                // if s == 2 || s == 3{
+                // if s < aov_len{
+                //     aov_list(s).splat(ctx.pixel, contri);
+                // }
 
                 let mis_contri = color_mulf(contri, mis);
                 // if pixel > 50000 && pixel < 50500{
@@ -780,8 +789,10 @@ fn @make_bi_renderer(max_path_len: i32, light_selector: LightSelector, aovs: AOV
                 let current_pos = surf.point;
                 // let current_light = mat.emission(current_pos);
                 let contrib = color_mul(pt.contrib, emit.intensity);
+
                 let mis = MISWeightS0(camera_buf, buf, pixel, t, pdf_lightpick, pdf_em); //the pt.depth thing is motlikly wrong
 
+                aov_list(0).splat(ctx.pixel, contrib);
                 return(make_option(color_mulf(contrib,mis)))
                 //return(Option[Color]::None)
             }

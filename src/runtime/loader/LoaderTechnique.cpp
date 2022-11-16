@@ -10,6 +10,7 @@
 #include "shader/ShaderUtils.h"
 
 #include <numeric>
+#include <string>
 
 namespace IG {
 // FIXME: The convergence rate is kinda bad and some have a slight bias, keep it uniform until fixes
@@ -273,21 +274,13 @@ static TechniqueInfo bi_get_info(const std::string&, const std::shared_ptr<Parse
 {
     TechniqueInfo info;
 
+    if (technique->property("aov_bi").getBool(false)) {
+        for(int i = 0; i < 4; i++){
+            info.EnabledAOVs.emplace_back("s=" + std::to_string(i));
+        }
+    }
+
     info.Variants.resize(2);
-
-    // Check if we have a proper defined technique
-    // It is totally fine to only define the type by other means then the scene config
-    // if (technique) {
-    //     if (technique->property("aov_mis").getBool(false)) {
-    //         info.EnabledAOVs.emplace_back("Direct Weights");
-    //         info.EnabledAOVs.emplace_back("NEE Weights");
-    //         info.Variants[0].ShadowHandlingMode = ShadowHandlingMode::Advanced;
-    //     }
-    // }
-
-    // auto variant_selector = [](uint32 i){
-    //     return (i + 1) % 2; //TODO this is only true if we begin with zero
-    // };
 
     //You should swap light and pathtracer than this would not be needed!!
     auto variant_selector = [] (size_t size){
@@ -375,29 +368,33 @@ static void bi_body_loader(std::ostream& stream, const std::string&, const std::
     const int max_depth     = technique ? technique->property("max_depth").getInteger(64) : 64;
     const float clamp_value = technique ? technique->property("clamp").getNumber(0) : 0; // Allow clamping of contributions
     const std::string ls    = technique ? technique->property("light_selector").getString(DefaultLightSelector) : DefaultLightSelector;
-    const bool hasMISAOV    = technique ? technique->property("aov_mis").getBool(false) : false;
-    const bool hasStatsAOV  = technique ? technique->property("aov_stats").getBool(false) : false;
+    const bool hasMISAOV    = technique ? technique->property("aov_bi").getBool(false) : false;
+
 
     if(ctx.CurrentTechniqueVariant == 0){
-        stream << "  let buf_size_camera = film_width * film_height * " << max_depth << " * vertex_size;" << std::endl;
-        stream << "  let buf_camera = device.request_buffer(\"camera\", buf_size_camera, 0);" << std::endl;
-        size_t counter = 1;
         if (hasMISAOV) {
-            stream << "  let aov_di  = device.load_aov_image(\"Direct Weights\", spi); aov_di.mark_as_used();" << std::endl;
-            stream << "  let aov_nee = device.load_aov_image(\"NEE Weights\", spi); aov_nee.mark_as_used();" << std::endl;
+            for(int i = 0; i < 4; i++){
+                stream << "  let aov_" << i << "  = device.load_aov_image(\"s=" << i << "\", spi); aov_" << i << ".mark_as_used();" << std::endl;
+            }
         }
 
         stream << "  let aovs = @|id:i32| -> AOVImage {" << std::endl
             << "    match(id) {" << std::endl;
 
         if (hasMISAOV) {
-            stream << "      1 => aov_di," << std::endl
-                << "      2 => aov_nee," << std::endl;
+            for(int i = 0; i < 4; i++){
+                //we use the ids => 2 because the framebuffer will always have the id = 1
+                stream << "      " << i + 2 << " => aov_" << i << "," << std::endl;
+            }
         }
 
         stream << "      _ => make_empty_aov_image()" << std::endl
             << "    }" << std::endl
             << "  };" << std::endl;
+
+        stream << "  let buf_size_camera = film_width * film_height * " << max_depth << " * vertex_size;" << std::endl;
+        stream << "  let buf_camera = device.request_buffer(\"camera\", buf_size_camera, 0);" << std::endl;
+        size_t counter = 1;
 
         ShadingTree tree(ctx);
         stream << ctx.Lights->generateLightSelector(ls, tree);
