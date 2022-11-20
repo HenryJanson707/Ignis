@@ -6,6 +6,14 @@ struct PixelCoord {
     ny: f32      // Normalized coordinate [-1, 1]
 }
 
+fn @make_empty_pixelcoord() = PixelCoord{
+    x = 0,
+    y = 0,
+    linear = 0,
+    nx = 0.0,
+    ny = 0.0
+};
+
 fn @make_pixelcoord_from_xy(x: i32, y: i32, w: i32, h: i32, sx: f32, sy: f32) = PixelCoord {
     x = x,
     y = y,
@@ -31,5 +39,7 @@ struct Camera {
     // Generates a ray for a point on the image plane (in [-1, 1]^2)
     generate_ray: fn (&mut RndState, PixelCoord) -> Ray,
     // Returns dx and dy vectors in respect to the pixel position (given as index)
-    differential: fn (PixelCoord) -> (Vec3, Vec3)
+    differential: fn (PixelCoord) -> (Vec3, Vec3),
+    // Returns the pixel of a given position in world space -1 if outside of the camera
+    get_pixel: fn (Vec3) -> (PixelCoord)
 }

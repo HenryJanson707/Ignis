@@ -60,6 +60,7 @@ fn @make_fishlens_camera(eye: Vec3, dir: Vec3, up: Vec3, w: f32, h: f32, mode: F
                 vec3_mulf(vec3_sub(d1x, d0), w),
                 vec3_mulf(vec3_sub(d1y, d0), h)
             )
-        }
+        },
+        get_pixel = @ |_| make_empty_pixelcoord()
     }
 }
