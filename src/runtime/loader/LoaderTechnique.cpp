@@ -342,6 +342,7 @@ static TechniqueInfo bi_get_info(const std::string&, const std::shared_ptr<Parse
     info.Variants[1].EmitterPayloadInitializer = "make_simple_payload_initializer(init_biraypayload)";
     info.Variants[1].PrimaryPayloadCount = 8;
 
+    info.Variants[0].RequiresExplicitCamera    = true; 
     info.Variants[0].UsesLights = true;
     info.Variants[0].EmitterPayloadInitializer = "make_simple_payload_initializer(init_biraypayload)";
     info.Variants[0].ShadowHandlingMode = ShadowHandlingMode::AdvancedWithMaterials;
@@ -398,7 +399,7 @@ static void bi_body_loader(std::ostream& stream, const std::string&, const std::
 
         ShadingTree tree(ctx);
         stream << ctx.Lights->generateLightSelector(ls, tree);
-        stream << "  let technique = make_bi_renderer(" << max_depth << ", light_selector, aovs, buf, buf_camera, max_depth_light);" << std::endl;
+        stream << "  let technique = make_bi_renderer(" << max_depth << ", light_selector, aovs, buf, buf_camera, max_depth_light, camera);" << std::endl;
     }else{
         stream << "  let technique = make_light_renderer(buf, max_depth_light);" << std::endl;
     }
