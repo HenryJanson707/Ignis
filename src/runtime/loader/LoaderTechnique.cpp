@@ -399,7 +399,7 @@ static void bi_body_loader(std::ostream& stream, const std::string&, const std::
 
         ShadingTree tree(ctx);
         stream << ctx.Lights->generateLightSelector(ls, tree);
-        stream << "  let technique = make_bi_renderer(" << max_depth << ", light_selector, aovs, buf, buf_camera, max_depth_light, camera);" << std::endl;
+        stream << "  let technique = make_bi_renderer(" << max_depth << ", light_selector, aovs, buf, buf_camera, max_depth_light, camera, film_width, film_height);" << std::endl;
     }else{
         stream << "  let technique = make_light_renderer(buf, max_depth_light);" << std::endl;
     }

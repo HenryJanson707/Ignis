@@ -63,7 +63,7 @@ fn @init_biraypayload(payload: RayPayload) = write_biraypayload(payload,
         eta     = 1
     });
 
-fn @make_bi_renderer(max_path_len: i32, light_selector: LightSelector, aovs: AOVTable, buf: DeviceBuffer, camera_buf: DeviceBuffer, max_path_len_light: i32, camera: Camera) -> Technique {
+fn @make_bi_renderer(max_path_len: i32, light_selector: LightSelector, aovs: AOVTable, buf: DeviceBuffer, camera_buf: DeviceBuffer, max_path_len_light: i32, camera: Camera, width: i32, height: i32) -> Technique {
     let pdf_lightpick = if light_selector.count > 0 {1.0 / (light_selector.count as f32)} else {1.0};
     let offset : f32  = 0.001;
 
@@ -787,7 +787,7 @@ fn @make_bi_renderer(max_path_len: i32, light_selector: LightSelector, aovs: AOV
                 
                 // //aov_di.splat(pixel, contrib);
                 let current_pos = surf.point;
-                //get_pixel_pos(camera_struct, current_pos);
+                //camera.get_pixel(current_pos, width, height);
                 // let current_light = mat.emission(current_pos);
                 let contrib = color_mul(pt.contrib, emit.intensity);
 

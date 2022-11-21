@@ -16,6 +16,7 @@ fn @compute_scale_from_vfov(fov: f32, aspect: f32) -> Vec2 {
 fn @make_perspective_camera(eye: Vec3, dir: Vec3, up: Vec3, scale: Vec2, tmin: f32, tmax: f32) -> Camera {
     let right = vec3_normalize(vec3_cross(dir, up));
     let view  = make_mat3x3(right, up, dir);
+    let inv_view = mat3x3_invert(view);
 
     Camera {
         generate_ray = @ |_, coord| {
@@ -28,7 +29,16 @@ fn @make_perspective_camera(eye: Vec3, dir: Vec3, up: Vec3, scale: Vec2, tmin: f
                 vec3_mulf(up, scale.y)
             )
         },
-        get_pixel = @ |_| make_empty_pixelcoord()
+        get_pixel = @ |pos, width, height| {
+            let dir = vec3_normalize(vec3_sub(pos, eye));
+            let view_space_dir = vec3_normalize(mat3x3_mul(inv_view, dir));
+            let image_plane_pos = make_vec2((view_space_dir.x / view_space_dir.z) / scale.x, (view_space_dir.y /view_space_dir.z) / scale.y);
+            // // print_string("\nx:");
+            // print_f32(image_plane_pos.x);
+            // print_string("\ny:");
+            // print_f32(image_plane_pos.y);
+            make_empty_pixelcoord()
+        }
     }
 }
 

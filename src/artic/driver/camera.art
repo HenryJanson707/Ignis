@@ -41,5 +41,5 @@ struct Camera {
     // Returns dx and dy vectors in respect to the pixel position (given as index)
     differential: fn (PixelCoord) -> (Vec3, Vec3),
     // Returns the pixel of a given position in world space -1 if outside of the camera
-    get_pixel: fn (Vec3) -> (PixelCoord)
+    get_pixel: fn (Vec3, i32, i32) -> (PixelCoord)
 }
