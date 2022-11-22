@@ -726,6 +726,15 @@ fn @make_bi_renderer(max_path_len: i32, light_selector: LightSelector, aovs: AOV
         let ray = ctx.ray;
         let pixel = ctx.pixel;
         let t = pt.depth + 1;
+
+        // if pt.depth == 1 {
+        //     let pixelCord = camera.get_pixel(surf.point, width, height);
+        //     let linear = pixelCord.linear;
+        //     if pixel != linear {
+        //         print_i32(pixel); print_string(" "); print_i32(linear); print_string("\n");
+        //     }
+        //     //print_i32(pixel); print_string(" "); print_i32(linear); print_string("\n");
+        // }
         // if pt.depth == 1 {
         //     aov_normal.splat(pixel, make_color(math_builtins::fabs(surf.local.col(2).x),
         //                                        math_builtins::fabs(surf.local.col(2).y),
