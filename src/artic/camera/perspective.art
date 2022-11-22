@@ -33,11 +33,26 @@ fn @make_perspective_camera(eye: Vec3, dir: Vec3, up: Vec3, scale: Vec2, tmin: f
             let dir = vec3_normalize(vec3_sub(pos, eye));
             let view_space_dir = vec3_normalize(mat3x3_mul(inv_view, dir));
             let image_plane_pos = make_vec2((view_space_dir.x / view_space_dir.z) / scale.x, (view_space_dir.y /view_space_dir.z) / scale.y);
-            // // print_string("\nx:");
-            // print_f32(image_plane_pos.x);
-            // print_string("\ny:");
-            // print_f32(image_plane_pos.y);
-            make_empty_pixelcoord()
+
+            let raw_x = ((image_plane_pos.x + 1.0)/2.0);
+            let raw_y = ((1.0 - image_plane_pos.y)/2.0);
+
+            let x =  math_builtins::floor((raw_x * width as f32) - 0.5 + 0.5) as i32; //we use - 0.5 to get to the midel of the pixel but then use + 0.5 to round with floor, the compiler should compile this away
+            let y =  math_builtins::floor((raw_y * height as f32) - 0.5 + 0.5) as i32;
+
+            if x < 0 || x >= width || y < 0 || y >= height || view_space_dir.z <= 0.0 { //if view_space_dir.z is smaller than 0.0 it should mean that the position is behind the camera
+                return(make_invalid_pixelcoord())
+            }
+
+            let linear = y * width + x;
+
+            PixelCoord {
+                x = x,
+                y = y,
+                linear = linear,
+                nx = view_space_dir.x,
+                ny = view_space_dir.y
+            }
         }
     }
 }
