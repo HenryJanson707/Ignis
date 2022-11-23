@@ -49,6 +49,7 @@ fn @make_light_camera(tmin: f32, tmax: f32, w: f32, h: f32, buf: DeviceBuffer, l
             store_vertex_Beta(buf, next_pos, beta);
             make_ray(pos, dir, tmin, tmax, ray_flag_camera)
         },
-        get_pixel = @ |_| make_empty_pixelcoord()
+        get_pixel = @ |_| make_empty_pixelcoord(),
+        get_pos = @ || make_vec3(0,0,0)
     }
 }
