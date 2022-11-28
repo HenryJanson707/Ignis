@@ -1,4 +1,5 @@
 fn @make_light_camera(tmin: f32, tmax: f32, w: f32, h: f32, buf: DeviceBuffer, light_selector: LightSelector, max_path_len: i32){
+    let offset = 0.001:f32;
     Camera {
         differential = @ |_| {//TODO this is wrong!!!!
             (
@@ -18,12 +19,21 @@ fn @make_light_camera(tmin: f32, tmax: f32, w: f32, h: f32, buf: DeviceBuffer, l
             let cos_light       = light_sample.cos;
             let pdfRev : f32    = 0.0;
             let pdf             = safe_div(cos_light, light_select_pdf); //TODO this could be a problem we dont know which valuse are useed in Light Intensity
-            let pos             = light_sample.pos;
             let intensity       = light_sample.intensity;
             let beta            = color_mulf(intensity, pdf);
             let wo              = make_vec3(0, 0, 0); //This should be fine because its s=1 wich never is called
             let dir             = light_sample.dir;
-            let normal          = dir; //TODO is not the normals
+            let pos             = light_sample.pos;
+
+            let normal          = light_sample.normal; //TODO is not the normals
+            // let pos_moved       = vec3_add(vec3_mulf(normal, 0.1), pos);
+
+            // let dot = vec3_dot(dir, light_sample.normal);
+
+            // if dot < 0.01{
+            //     print_f32(dot); print_string("\n");
+            // }
+    
             let delta           = if light.delta {1} else {0};
             let uv              = light_sample.pos; //TODO this is not uv i guess???????
 
@@ -47,7 +57,7 @@ fn @make_light_camera(tmin: f32, tmax: f32, w: f32, h: f32, buf: DeviceBuffer, l
             
             store_vertex_pdfFwd(buf, next_pos, pdfFwd2);
             store_vertex_Beta(buf, next_pos, beta);
-            make_ray(pos, dir, tmin, tmax, ray_flag_camera)
+            make_ray(pos, dir, select(light.infinite, 0:f32, offset), flt_max, ray_flag_light)
         },
         get_pixel = @ |_| make_empty_pixelcoord(),
         get_pos = @ || make_vec3(0,0,0)

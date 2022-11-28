@@ -430,16 +430,48 @@ fn @make_bi_renderer(max_path_len: i32, light_selector: LightSelector, aovs: AOV
         let choice = if light_path_len == 0 {1} else {pick_light_id(rnd, light_path_len) + 1};
         //let s = if light_path_len >= 3 {3} else {0}; //important currently there is no choice here!!!!
         let s = choice;
+        //let s = -1;
         //let s = if light_path_len >= 3 {3} else {0};
         //let s = 0;
         //let s = 2;
         //let s = 1;
         let t = pt.depth + 1;
 
+        // if light_path_len == 0{
+        //     print_string("Hello\n");
+        // }
+
 
         let s_choice_pdf = if light_path_len > 0 {light_path_len as f32} else {1}; //this will be a problem if light_path_len is 0 TODO Fix
+        if s == -1 && light_path_len > 0{ //Todo this last part ist only for testing and needs to be deleted
+            let choice_s = 3;
 
-        if s == 1{
+            let light_buf_pos_corrected = light_buf_pos + vertex_size * (choice_s - 1);
+
+            //TODO importently not all values here are needed delete the rest, aspschly for the Light ones
+            let light_vertex = load_vertex(buf, light_buf_pos_corrected);
+            let light_point = light_vertex.pos;
+
+            let cam_pos = camera.get_pos();
+            let cam_dir = vec3_sub(light_point, cam_pos);
+            
+            let pixelCord = camera.get_pixel(light_point, width, height);
+
+            //get_aov(0).splat(pixelCord.linear, make_color(1.0, 1.0, 1.0, 1.0));
+            write_secondarypayload(secondary_payloads, SecondaryPayload {
+                s=choice_s,
+                t=-1,
+                ri=make_vec2(0.0, 0.0),
+                light_wo=make_vec3(0.0, 0.0, 0.0),
+                camera_pos=make_vec3(0.0, 0.0, 0.0),
+
+            });
+            make_advanced_shadow_ray(
+                make_ray(cam_pos, cam_dir, offset, 1 - offset, ray_flag_light),
+                make_color(1.0, 1.0, 1.0, 1.0),
+                light_vertex.mat
+            )
+        } else if s == 1{
             let (light, light_select_pdf) = light_selector.sample(rnd, ctx.surf.point); //sollte eventuel wie im normalen pathtracer angepasst werden!!
             let sample_direct = light.sample_direct;
             let light_sample  = @sample_direct(rnd, surf);
@@ -523,7 +555,7 @@ fn @make_bi_renderer(max_path_len: i32, light_selector: LightSelector, aovs: AOV
                     sampled.valid = 1;
                     sampled.pos = light_sample.pos;
                     sampled.beta = light_beta;
-                    sampled.normal = make_vec3(0.5369, -0.843659, 0.0000); //this is only temporary and is should be fixed
+                    sampled.normal = light_sample.normal; //this is only temporary and is should be fixed
                     let mut pt = make_empty_Vertex();
                     //this should be enough but im not quit sure 
                     pt.valid = 1;
@@ -666,8 +698,35 @@ fn @make_bi_renderer(max_path_len: i32, light_selector: LightSelector, aovs: AOV
         , color: Color) -> Option[Color] {
             let secondary = unwrap_secondarypayload(payload);
             let s = secondary.s;
-            if s > 1{
-                let light_buf_pos  = vertex_size * pixel * max_path_len_light;
+            let t = secondary.t;
+            let light_buf_pos  = vertex_size * pixel * max_path_len_light;
+
+            if t == -1{
+                let light_buf_pos_corrected = light_buf_pos + vertex_size * (s - 1);
+
+                let light_vertex = load_vertex(buf, light_buf_pos_corrected);
+                let pixelCord = camera.get_pixel(light_vertex.pos, width, height);
+                let light_pos = light_vertex.pos;
+                let light_normal = light_vertex.normal;
+
+                let camera_pos = camera.get_pos();
+                let cam_dir = vec3_normalize(vec3_sub(camera_pos, light_pos));
+
+                let ctx = make_miss_contri_shadingContext(pixel, light_pos, camera_pos, light_normal);
+                let mat = shader(ctx);
+
+                let light_bsdf = mat.bsdf.eval(cam_dir, light_vertex.wo);
+                let contri = color_mul(light_bsdf, light_vertex.beta);
+
+                let new_pixel = pixelCord.linear;
+                if new_pixel != -1{
+                    get_aov(0).splat(new_pixel, contri);
+                    //get_aov(0).splat(new_pixel, make_color(1.0, 1.0, 1.0, 1.0));
+                    Option[Color]::None
+                } else{
+                    Option[Color]::None
+                }
+            } else if s > 1{
                 let light_buf_pos_corrected = light_buf_pos + vertex_size * (secondary.s - 1);
 
                 let light_vertex = load_vertex(buf, light_buf_pos_corrected);

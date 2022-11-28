@@ -35,12 +35,14 @@ fn @make_area_light(id: i32, area: AreaEmitter, color_f: Texture) = Light {
         let sample = sample_cosine_hemisphere(randf(rnd), randf(rnd));
         let weight = safe_div(1, area_pdf * sample.pdf);
         let ctx    = make_emissive_shading_context(make_zero_ray(), surf, vec2_to_3(surf.tex_coords, 0));
-        make_emission_sample(surf.point,
+        let normal = surf.face_normal;
+        make_emission_sample_full(surf.point,
             mat3x3_mul(surf.local, sample.dir),
             color_mulf(color_f(ctx), weight),
             area_pdf,
             sample.pdf,
-            sample.dir.z)
+            sample.dir.z,
+            surf.face_normal)
     },
     emission     = color_f,
     pdf_direct   = @ |ray, surf| area.pdf_direct(surf.prim_coords, ray.org),
