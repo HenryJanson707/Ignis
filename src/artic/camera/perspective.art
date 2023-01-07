@@ -54,7 +54,8 @@ fn @make_perspective_camera(eye: Vec3, dir: Vec3, up: Vec3, scale: Vec2, tmin: f
                 ny = view_space_dir.y
             }
         },
-        get_pos = @ || eye
+        get_pos = @ || eye,
+        get_pdf = @ || scale.x * scale.y
     }
 }
 
@@ -82,6 +83,7 @@ fn @make_perspective_dof_camera(eye: Vec3, dir: Vec3, up: Vec3, scale: Vec2, ape
             )
         },
         get_pixel = @ |_| make_empty_pixelcoord(),
-        get_pos = @ || eye
+        get_pos = @ || eye,
+        get_pdf = @ || 0.0
     }
 }

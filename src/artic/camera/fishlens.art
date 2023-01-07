@@ -62,6 +62,7 @@ fn @make_fishlens_camera(eye: Vec3, dir: Vec3, up: Vec3, w: f32, h: f32, mode: F
             )
         },
         get_pixel = @ |_| make_empty_pixelcoord(),
-        get_pos = @ || eye
+        get_pos = @ || eye,
+        get_pdf = @ || 0.0
     }
 }

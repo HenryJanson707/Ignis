@@ -430,7 +430,7 @@ fn @make_bi_renderer(max_path_len: i32, light_selector: LightSelector, aovs: AOV
         let choice = if light_path_len == 0 {1} else {pick_light_id(rnd, light_path_len) + 1};
         //let s = if light_path_len >= 3 {3} else {0}; //important currently there is no choice here!!!!
         let s = choice;
-        //let s = -1;
+        //let s = -2;
         //let s = if light_path_len >= 3 {3} else {0};
         //let s = 0;
         //let s = 2;
@@ -444,7 +444,7 @@ fn @make_bi_renderer(max_path_len: i32, light_selector: LightSelector, aovs: AOV
 
         let s_choice_pdf = if light_path_len > 0 {light_path_len as f32} else {1}; //this will be a problem if light_path_len is 0 TODO Fix
         if s == -1 && light_path_len > 0{ //Todo this last part ist only for testing and needs to be deleted
-            let choice_s = 3;
+            let choice_s = 2;
 
             let light_buf_pos_corrected = light_buf_pos + vertex_size * (choice_s - 1);
 
@@ -716,7 +716,8 @@ fn @make_bi_renderer(max_path_len: i32, light_selector: LightSelector, aovs: AOV
                 let mat = shader(ctx);
 
                 let light_bsdf = mat.bsdf.eval(cam_dir, light_vertex.wo);
-                let contri = color_mul(light_bsdf, light_vertex.beta);
+                let camera_pdf = camera.get_pdf();
+                let contri = color_mulf(color_mul(light_bsdf, light_vertex.beta), camera_pdf);
 
                 let new_pixel = pixelCord.linear;
                 if new_pixel != -1{
@@ -877,7 +878,7 @@ fn @make_bi_renderer(max_path_len: i32, light_selector: LightSelector, aovs: AOV
 
                 let mis = MISWeightS0(camera_buf, buf, pixel, t, pdf_lightpick, pdf_em); //the pt.depth thing is motlikly wrong
 
-                get_aov(0).splat(ctx.pixel, contrib);
+                //get_aov(0).splat(ctx.pixel, contrib);
                 return(make_option(color_mulf(contrib,mis)))
                 //return(Option[Color]::None)
             }

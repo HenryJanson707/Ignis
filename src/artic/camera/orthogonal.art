@@ -13,6 +13,7 @@ fn @make_orthogonal_camera(eye: Vec3, dir: Vec3, up: Vec3, scale: Vec2, tmin: f3
             )
         },
         get_pixel = @ |_| make_empty_pixelcoord(),
-        get_pos = @ || eye
+        get_pos = @ || eye,
+        get_pdf = @ || 0.0
     }
 }
