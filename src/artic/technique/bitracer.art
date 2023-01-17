@@ -360,7 +360,7 @@ fn @make_bi_renderer(max_path_len: i32, light_selector: LightSelector, aovs: AOV
 
         let qsMinusPdfRev = pdfConectionGround(qs, pt, qsMinus, mat);
         ri *= misSaveDiv(qsMinusPdfRev, qsMinus.pdfFwd);
-        if qsMinus.isDelta == 0 && (s-3 > -1 || (load_vertex_isDelta(lightBuf, startLightBuf + vertex_size * (s-3)) == 0)){//TODO check here
+        if qsMinus.isDelta == 0 && (s-3 < 0 || (load_vertex_isDelta(lightBuf, startLightBuf + vertex_size * (s-3)) == 0)){//TODO check here
             sumRi += ri;
         }
         
@@ -375,7 +375,7 @@ fn @make_bi_renderer(max_path_len: i32, light_selector: LightSelector, aovs: AOV
         //the NaN is here!!!!!!!!
         while i > -1{
             ri *= misSaveDiv(load_vertex_pdfRev(lightBuf, startLightBuf + vertex_size * i), load_vertex_pdfFwd(lightBuf, startLightBuf + vertex_size * i)); //Extra check here
-            if load_vertex_isDelta(lightBuf, startLightBuf + vertex_size * i) == 0 && (i-1 > -1 || (load_vertex_isDelta(lightBuf, startLightBuf + vertex_size * (i-1)) == 0)){//TODO check here
+            if load_vertex_isDelta(lightBuf, startLightBuf + vertex_size * i) == 0 && (i-1 < 0 || (load_vertex_isDelta(lightBuf, startLightBuf + vertex_size * (i-1)) == 0)){//TODO check here
                 sumRi += ri;
             }
             i -= 1;
