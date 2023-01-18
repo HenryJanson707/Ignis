@@ -22,14 +22,10 @@ fn @make_light_renderer(buf: DeviceBuffer, max_path_len_light: i32) -> Technique
         let surf = ctx.surf;
         let pixel = ctx.pixel;
         
-        //TODO is that at the right position or should it be further down?
         if pt.depth >= max_path_len_light {
             return(Option[Ray]::None)
         }
-
-        //aov_stats.splat(pixel, make_color(if pt.depth == 1 { 2 } else { 1 }, 0, 0));
-
-        // Bounce
+        
         let wo       = vec3_neg(ray.dir);
         let buf_pos  = vertex_size * pixel * max_path_len_light;
         //TODO check wo?
@@ -40,14 +36,14 @@ fn @make_light_renderer(buf: DeviceBuffer, max_path_len_light: i32) -> Technique
             let current_buf_pos = buf_pos + pt.depth * vertex_size;
             let prev_buf_pos = buf_pos + (pt.depth - 1) * vertex_size;
 
-            if pt.depth == 1{ //TODO we assume here that the fist hit is state.dpeth == 1 this has to be tested
+            if pt.depth == 1{
                 let start_vertex = load_vertex(buf, current_buf_pos);  
 
                 pdfFwd     = start_vertex.pdfFwd;
                 beta       = start_vertex.beta;
             }
 
-            let mut pdfRev = mat.bsdf.pdf(mat_sample.in_dir, wo); //this could be wrong!!!!
+            let mut pdfRev = mat.bsdf.pdf(mat_sample.in_dir, wo); 
 
             let current_pos     = surf.point;
             let current_normal  = surf.face_normal;
@@ -71,13 +67,13 @@ fn @make_light_renderer(buf: DeviceBuffer, max_path_len_light: i32) -> Technique
             let current_uv      = make_vec3(surf.prim_coords.x, surf.prim_coords.y, 1.0);
 
             store_vertex_pdfRev(buf, prev_buf_pos, correctedRevPDF);
-            store_vertex_valid(buf, buf_pos, pt.depth + 1);//this means the first pixel position indicates the depth
+            store_vertex_valid(buf, buf_pos, pt.depth + 1);
 
             //The current size of one data point is vertex_size bytes (valid: i32 (0, 1): 0, material: i32: 1, pdfFwd: f32 : 2, pdfRev: f32: 3, pos: vec3 : 4, normal: vec3 : 7, beta: vec3 : 10, wo: vec3 : 13)
             store_vertex_data(buf, current_buf_pos, 1, mat.id, correctedFwdPDF, 0.0, current_pos, current_normal, beta, wo, current_isDelta, current_uv);
 
             let next_pdf = mat_sample.pdf;
-            if next_pdf == 0.0{ //TODO better use Epsilon?
+            if next_pdf == 0.0{ 
                 return(Option[Ray]::None)
             }
             let next_contri = color_mul(beta, mat_sample.color); //cos and pdf is already applied
@@ -89,15 +85,6 @@ fn @make_light_renderer(buf: DeviceBuffer, max_path_len_light: i32) -> Technique
                 eta = pt.eta * mat_sample.eta
             });
             make_option(make_ray(surf.point, mat_sample.in_dir, offset, flt_max, ray_flag_bounce))
-            // make_option(
-            //     make_ray(surf.point, mat_sample.in_dir, offset, flt_max, ray_flag_bounce),
-            //     wrap_ptraypayload(PTRayPayload {
-            //         mis = next_pdf,
-            //         contrib = next_contri,
-            //         depth = pt.depth + 1,
-            //         eta  = pt.eta * mat_sample.eta
-            //     })
-            // )
         } else {
             Option[Ray]::None
         }
