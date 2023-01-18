@@ -1,4 +1,4 @@
-fn @make_light_camera(tmin: f32, tmax: f32, w: f32, h: f32, buf: DeviceBuffer, light_selector: LightSelector, max_path_len: i32){
+fn @make_light_camera(_tmin: f32, _tmax: f32, _w: f32, _h: f32, buf: DeviceBuffer, light_selector: LightSelector, max_path_len: i32){
     let offset = 0.001:f32;
     Camera {
         differential = @ |_| {
