@@ -409,6 +409,10 @@ fn @make_bi_renderer(max_path_len: i32, light_selector: LightSelector, aovs: AOV
         //     s = 0;
         // }
 
+        if s + t > max_path_len + 1 {
+            s = 0;
+        }
+
         let s_choice_pdf = if light_path_len > 0 {light_path_len as f32} else {1};
         if s == -1 && light_path_len > 0{ //Todo this last part ist only for testing and needs to be deleted
             let choice_s = 2;
