@@ -36,10 +36,9 @@ fn @make_light_renderer(buf: DeviceBuffer, max_path_len_light: i32) -> Technique
             let current_buf_pos = buf_pos + pt.depth * vertex_size;
             let prev_buf_pos = buf_pos + (pt.depth - 1) * vertex_size;
 
-            if pt.depth == 1{
-                let start_vertex = load_vertex(buf, current_buf_pos);  
-
-                pdfFwd     = start_vertex.pdfFwd;
+            let start_vertex = load_vertex(buf, current_buf_pos);
+            if pt.depth == 1{ 
+                pdfFwd     = start_vertex.pdfRev;
                 beta       = start_vertex.beta;
             }
 
@@ -62,8 +61,8 @@ fn @make_light_renderer(buf: DeviceBuffer, max_path_len_light: i32) -> Technique
                 current_isDelta = 1;
                 pdfRev = 0.0;
                 pdfFwd = 0.0;
-            }
-;
+            };
+            
             let current_uv      = make_vec3(surf.prim_coords.x, surf.prim_coords.y, 1.0);
 
             store_vertex_pdfRev(buf, prev_buf_pos, correctedRevPDF);

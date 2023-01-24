@@ -337,10 +337,77 @@ fn @make_bi_renderer(max_path_len: i32, light_selector: LightSelector, aovs: AOV
 
         let light_path_len = load_vertex_valid(buf, light_buf_pos);
 
+        pick_light_id(rnd, light_path_len);
+
         let choice = if light_path_len == 0 {1} else {pick_light_id(rnd, light_path_len) + 1};
-        let s = choice;
+        //let choice = pick_light_id(rnd, light_path_len) + 1;
+
+        // if pixel == 32423{
+        //     let runs = 1024 * 1024;
+        //     let iters = 1;
+        //     let sample_count = runs * iters;
+
+        //     let mut u0 = 0;
+        //     let mut u1 = 0;
+        //     for i in range(0, runs){
+        //         let mut hash = fnv_init();
+        //         hash = fnv_hash(hash, i as u32);
+
+        //         for j in range(0, iters) {
+        //             let hash2 = fnv_hash(hash, j as u32);
+        //             let mut rnd2 = hash2;
+        //             let k = pick_light_id(&mut rnd2, 2);
+        //             if k == 0 {++u0;} else {++u1;}
+        //         }
+        //     }
+
+        //     print_string("U0=");
+        //     print_f32(100 * u0 as f32 / sample_count as f32);
+        //     print_string("%\nU1=");
+        //     print_f32(100 * u1 as f32 / sample_count as f32);
+        //     print_string("%\n");
+        // }
+
+        // if light_path_len == 2{
+
+        //     if choice == 1{
+        //         print_string("a");
+        //     }else{
+        //         print_string("b");
+        //     }
+        //     // print_i32(choice + 2);
+
+        //     let constant_random = pick_light_id(rnd, 2) + 1;
+        //     if constant_random == 1{
+        //         print_string("0");
+        //     }else{
+        //         print_string("1");
+        //     }
+        //}
+
+        //let mut choice = 1;
+
+        // if light_path_len == 2{
+        //     choice = pick_light_id(rnd, 2) + 1;
+        // }else if light_path_len == 3 { 
+        //     choice = pick_light_id(rnd, 3) + 1;
+        // }else if light_path_len == 4 { 
+        //     choice = pick_light_id(rnd, 4) + 1;
+        // }else if light_path_len == 5 { 
+        //     choice = pick_light_id(rnd, 5) + 1;
+        // }
+
+        let mut s = choice;
 
         let t = pt.depth + 1;
+
+        //s = if light_path_len > 1 {1} else {0};
+
+        // s = 2;
+
+        // if s + t != 4 {
+        //     s = 0;
+        // }
 
         let s_choice_pdf = if light_path_len > 0 {light_path_len as f32} else {1};
         if s == -1 && light_path_len > 0{ //Todo this last part ist only for testing and needs to be deleted
@@ -441,6 +508,19 @@ fn @make_bi_renderer(max_path_len: i32, light_selector: LightSelector, aovs: AOV
                         camera_pos=make_vec3(0.0, 0.0, 0.0),
 
                     });
+
+                    // let test_color = if choice_test == 0{
+                    //     //print_i32(0);
+                    //     make_color(100.0, 0.0, 0.0, 1.0)
+                    // }else{
+                    //     //print_i32(1);
+                    //     make_color(0.0, 0.0, 0.0, 1.0)
+                    // };
+
+                    // let light_buf_pos_corrected = light_buf_pos + vertex_size * (1);
+
+                    // let light_vertex = load_vertex(buf, light_buf_pos_corrected);
+
                     return(make_simple_shadow_ray(
                         make_ray(surf.point, light_dir, offset, 1 - offset, ray_flag_light),
                         mis_contri

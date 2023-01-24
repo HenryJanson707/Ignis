@@ -59,6 +59,8 @@ fn @make_path_renderer(max_path_len: i32, light_selector: LightSelector, aovs: A
         if mat.bsdf.is_specular || light_selector.count == 0 {
             return(ShadowRay::None)
         }
+
+        pick_light_id(rnd, light_selector.count);
         
         let pt = unwrap_ptraypayload(payload);
         if pt.depth + 1 > max_path_len {
