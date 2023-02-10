@@ -60,7 +60,7 @@ fn @uniform_hemisphere_pdf() = 1 / (2 * flt_pi);
 
 // Samples a direction uniformly on a hemisphere
 fn @sample_uniform_hemisphere(u: f32, v: f32) -> DirSample {
-    let c = math_builtins::fabs(2 * v - 1);
+    let c = v;
     let s = safe_sqrt(1 - c * c);
     let phi = 2 * flt_pi * u;
     make_dir_sample(c, s, phi, uniform_hemisphere_pdf())

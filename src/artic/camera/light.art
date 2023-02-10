@@ -8,6 +8,7 @@ fn @make_light_camera(_tmin: f32, _tmax: f32, _w: f32, _h: f32, buf: DeviceBuffe
             )
         },
         generate_ray = @ |rnd, coord| {
+            pick_light_id(rnd, 5);
             let pixel = coord.linear;
 
             let (light, light_select_pdf) = light_selector.sample(rnd, make_vec3(0,0,0)); 
@@ -36,7 +37,8 @@ fn @make_light_camera(_tmin: f32, _tmax: f32, _w: f32, _h: f32, buf: DeviceBuffe
             //The current size of one data point is vertex_size bytes (valid: i32 (0, 1): 0, material: i32: 1, pdfFwd: f32 : 2, pdfRev: f32: 3, pos: vec3 : 4, normal: vec3 : 7, beta: vec3 : 10, wo: vec3 : 13)
             store_vertex_data(buf, current_pos, 0, -1, pdfFwd, pdfRev, pos, normal, intensity, wo, delta, uv);
             
-            store_vertex_pdfFwd(buf, next_pos, pdfFwd2);
+            store_vertex_pdfFwd(buf, next_pos, 1.0);
+            store_vertex_pdfRev(buf, next_pos, pdfFwd2);
             store_vertex_Beta(buf, next_pos, beta);
             make_ray(pos, dir, select(light.infinite, 0:f32, offset), flt_max, ray_flag_light)
         },

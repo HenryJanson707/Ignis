@@ -40,6 +40,7 @@ fn @make_light_renderer(buf: DeviceBuffer, max_path_len_light: i32) -> Technique
             if pt.depth == 1{ 
                 pdfFwd     = start_vertex.pdfRev;
                 beta       = start_vertex.beta;
+                store_vertex_pdfRev(buf, current_buf_pos, 0.0);
             }
 
             let mut pdfRev = mat.bsdf.pdf(mat_sample.in_dir, wo); 
