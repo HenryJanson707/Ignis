@@ -1,10 +1,7 @@
 {
 	"technique": {
 		"type": "path",
-		"max_depth": 64,
-		"aov_normals": true,
-		"aov_mis": true,
-		"aov_stats": true
+		"max_depth": 5
 	},
 	"camera": {
 		"type": "perspective",
